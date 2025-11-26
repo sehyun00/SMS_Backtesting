@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Data Preprocessing for 5-Factor Stock Model
+Data Preprocessing for 5-Factor Stock Model - 10 Stocks, 10 Years
 Converted from: data_preprocessing(5_19)이거쓸거임_ipynb의_사본.ipynb
 """
 
@@ -35,37 +35,21 @@ warnings.filterwarnings('ignore')
 
 class DailyStockFactorModel:
     def __init__(self):
-        print("일별 5팩터 모델 데이터 처리 시작")
+        print("일별 5팩터 모델 데이터 처리 시작 (10년치)")
         self.start_time = time.time()
 
         # 현재 날짜 설정
         self.current_date = datetime.now()
-        # 1년 전 날짜 계산
-        self.one_year_ago = self.current_date - relativedelta(years=1)
+        # 10년 전 날짜 계산
+        self.ten_years_ago = self.current_date - relativedelta(years=10)
 
-        # 한국/미국 대표 주식 리스트
-        self.kr_stocks = []
-        self.us_stocks = []
+        # 종목 리스트
+        self.stocks = []
 
         # 데이터 저장용 변수
-        self.stock_data = {}  # stock_data 속성 추가
+        self.stock_data = {}
         self.daily_dates = []
         self.factor_model_data = pd.DataFrame()
-
-        # 기본 베타값 딕셔너리 (API에서 가져오지 못할 경우 사용)
-        self.default_beta_values = {
-            '005935.KS': 0.85, '051910.KS': 1.25, '006400.KS': 1.30,
-            '035720.KS': 1.35, '028260.KS': 1.10, '066570.KS': 1.15,
-            '032830.KS': 0.80, '000810.KS': 0.75, '009150.KS': 1.05,
-            '018260.KS': 0.95, '017670.KS': 0.90, '034730.KS': 1.00,
-            '003550.KS': 1.10, '036570.KS': 1.40, '015760.KS': 0.65,
-            '259960.KS': 1.50, '009540.KS': 1.20, '005490.KS': 1.05,
-            '055550.KS': 0.95, '323410.KS': 1.30, '316140.KS': 0.85,
-            '086790.KS': 0.90, '097950.KS': 1.10, '030200.KS': 0.75,
-            '003670.KS': 1.15, '096770.KS': 1.25, '000100.KS': 0.80,
-            '033780.KS': 0.85, '138040.KS': 0.95, '139480.KS': 0.70,
-            '000020.KS': 0.83
-        }
 
         # 팩터 가중치 설정
         self.factor_weights = {
@@ -76,30 +60,41 @@ class DailyStockFactorModel:
             'Volatility_Factor': 0.20
         }
 
-    def get_exchange_rate_krw_to_usd(self):
-        """KRW to USD 환율을 가져옵니다"""
+    def load_stocks_from_space_csv(self, csv_path='stock_list.csv'):
+        """스페이스에 저장된 CSV 파일에서 10개 종목 정보를 가져옵니다"""
+        print("\n스페이스 CSV 파일에서 종목 정보 가져오기...")
+        
         try:
-            url = "https://api.exchangerate-api.com/v4/latest/USD"
-            response = requests.get(url)
-            data = response.json()
-
-            usd_to_krw = data['rates']['KRW']
-            krw_to_usd = 1 / usd_to_krw
-
-            print(f"현재 환율: 1 USD = {usd_to_krw:.2f} KRW, 1 KRW = {krw_to_usd:.8f} USD")
-            return krw_to_usd
+            # CSV 파일 로드
+            df = pd.read_csv(csv_path, encoding='utf-8')
+            
+            # 컬럼명 확인 및 변환
+            if '티커' in df.columns:
+                df = df.rename(columns={
+                    '티커': 'symbol',
+                    '종목명': 'name',
+                    '섹터': 'sector',
+                    '세부 산업': 'industry'
+                })
+            
+            # 종목 리스트로 변환
+            self.stocks = df[['symbol', 'name', 'sector', 'industry']].to_dict('records')
+            
+            print(f"총 {len(self.stocks)}개 종목 로드 완료:")
+            for stock in self.stocks:
+                print(f"  - {stock['name']} ({stock['symbol']}): {stock['sector']} / {stock['industry']}")
+            
+            return self.stocks
+            
         except Exception as e:
-            print(f"환율 정보 가져오기 실패: {e}, 기본 환율 사용")
-            return 0.00077
+            print(f"CSV 파일 로드 실패: {e}")
+            return []
 
-    def get_trading_days(self, start_date, end_date, market='KRX'):
+    def get_trading_days(self, start_date, end_date, market='NYSE'):
         """특정 기간의 모든 거래일을 찾습니다"""
         try:
-            # 해당 시장의 캘린더 생성
-            if market == 'KRX':
-                exchange = mcal.get_calendar('XKRX')
-            else:  # 미국 시장
-                exchange = mcal.get_calendar('NYSE')
+            # 미국 시장 캘린더 생성
+            exchange = mcal.get_calendar(market)
 
             # 해당 기간의 거래일 가져오기
             trading_days = exchange.valid_days(start_date=start_date, end_date=end_date)
@@ -112,152 +107,18 @@ class DailyStockFactorModel:
             print(f"거래일 정보 가져오기 실패: {e}")
             return []
 
-    def generate_daily_dates(self, market='KRX'):
-        """지난 1년간의 모든 거래일 목록을 생성합니다"""
-        start_date = self.one_year_ago.strftime('%Y-%m-%d')
+    def generate_daily_dates(self, market='NYSE'):
+        """지난 10년간의 모든 거래일 목록을 생성합니다"""
+        start_date = self.ten_years_ago.strftime('%Y-%m-%d')
         end_date = self.current_date.strftime('%Y-%m-%d')
 
         trading_days = self.get_trading_days(start_date, end_date, market)
 
-        print(f"{market} 시장의 지난 1년간 거래일 {len(trading_days)}개 찾음")
+        print(f"{market} 시장의 지난 10년간 거래일 {len(trading_days)}개 찾음")
 
         # 일별 날짜 저장
         self.daily_dates = trading_days
         return trading_days
-
-    def get_korean_stocks(self, csv_path='KR_Stock_Master.csv'):
-        print("\n한국 대표 주식 가져오기...")
-        # CSV 파일 로드
-        df = pd.read_csv(csv_path, dtype={'Code': str})
-
-        # 종목코드 6자리로 맞추기
-        df['Code'] = df['Code'].str.zfill(6)
-
-        # Market에 따라 suffix 붙이기
-        def add_suffix(row):
-            market = str(row['Market']).strip().upper()
-            if market == 'KOSPI':
-                return row['Code'] + '.KS'
-            elif market == 'KOSDAQ' or market == 'KOSDAQ GLOBAL':
-                return row['Code'] + '.KQ'
-            else:
-                return row['Code']
-
-        df['symbol'] = df.apply(add_suffix, axis=1)
-        df['name'] = df['Name']
-
-        # 원하는 컬럼만 추출
-        self.kr_stocks = df[['symbol', 'name']].to_dict('records')
-
-        print(f"한국 주식 {len(self.kr_stocks)}개 로드 완료")
-        return self.kr_stocks
-
-    def get_us_stocks(self, csv_path='US_Stock_Master.csv'):
-        print("\n미국 대표 주식 가져오기...")
-        # CSV 파일 로드
-        df = pd.read_csv(csv_path, dtype={'ACT Symbol': str})
-
-        # 결측값 제거 (심볼이나 이름이 없는 행 제외)
-        df = df[['ACT Symbol', 'Company Name']].dropna(subset=['ACT Symbol', 'Company Name'])
-
-        # 컬럼명 통일
-        df = df.rename(columns={'ACT Symbol': 'symbol', 'Company Name': 'name'})
-
-        # 딕셔너리 리스트로 변환
-        self.us_stocks = df.to_dict('records')
-
-        print(f"미국 주식 {len(self.us_stocks)}개 로드 완료")
-        return self.us_stocks
-
-    def get_beta_from_naver_scraping(self, symbol):
-        """네이버 금융 웹 스크래핑으로 베타(Beta) 정보를 가져옵니다"""
-        try:
-            stock_code = symbol.split('.')[0]
-            url = f"https://finance.naver.com/item/main.naver?code={stock_code}"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
-            }
-
-            response = requests.get(url, headers=headers, timeout=(5, 30))
-            if response.status_code != 200:
-                return None
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # 베타값 찾기 시도 1: 테이블에서 베타값 찾기
-            beta_element = soup.select_one("table:contains('베타') td.num") or soup.select_one("table:contains('β') td.num")
-            if beta_element and beta_element.text.strip():
-                beta_text = beta_element.text.strip()
-                beta_text = ''.join(c for c in beta_text if c.isdigit() or c == '.' or c == '-')
-                if beta_text and beta_text != '-':
-                    beta = float(beta_text)
-                    if beta > 0:
-                        print(f"{symbol}: 네이버 금융에서 베타값 {beta:.4f} 가져옴")
-                        return beta
-
-            # 베타값 찾기 시도 2: 다른 방식으로 시도
-            aws_tables = soup.find_all("table", class_="aws")
-            for table in aws_tables:
-                rows = table.find_all("tr")
-                for row in rows:
-                    cols = row.find_all("td")
-                    for i, col in enumerate(cols):
-                        if '베타' in col.text or 'β' in col.text:
-                            if i+1 < len(cols) and cols[i+1].text.strip():
-                                beta_text = cols[i+1].text.strip()
-                                beta_text = ''.join(c for c in beta_text if c.isdigit() or c == '.' or c == '-')
-                                if beta_text and beta_text != '-':
-                                    beta = float(beta_text)
-                                    if beta > 0:
-                                        print(f"{symbol}: 네이버 금융에서 베타값 {beta:.4f} 가져옴")
-                                        return beta
-
-            return None
-        except Exception as e:
-            print(f"{symbol}: 베타값 스크래핑 중 오류 발생 - {e}")
-            return None
-
-    def get_pbr_from_naver_scraping(self, symbol):
-        """네이버 금융 웹 스크래핑으로 PBR 정보를 가져옵니다"""
-        try:
-            stock_code = symbol.split('.')[0]
-            url = f"https://finance.naver.com/item/main.naver?code={stock_code}"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
-            }
-
-            response = requests.get(url, headers=headers, timeout=(5, 30))
-            if response.status_code != 200:
-                return None
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-            pbr_element = soup.select_one("table:contains('PBR') td.num")
-            if pbr_element and pbr_element.text.strip():
-                pbr_text = pbr_element.text.strip()
-                pbr_text = ''.join(c for c in pbr_text if c.isdigit() or c == '.' or c == '-')
-                if pbr_text and pbr_text != '-':
-                    pbr = float(pbr_text)
-                    if pbr > 0:
-                        print(f"{symbol}: 네이버 금융에서 PBR값 {pbr:.4f} 가져옴")
-                        return pbr
-
-            # 다른 방식으로도 시도
-            pbr_selector = "#_pbr"
-            pbr_element = soup.select_one(pbr_selector)
-            if pbr_element and pbr_element.text.strip():
-                pbr_text = pbr_element.text.strip()
-                pbr_text = ''.join(c for c in pbr_text if c.isdigit() or c == '.' or c == '-')
-                if pbr_text and pbr_text != '-':
-                    pbr = float(pbr_text)
-                    if pbr > 0:
-                        print(f"{symbol}: 네이버 금융에서 PBR값 {pbr:.4f} 가져옴")
-                        return pbr
-
-            return None
-        except Exception:
-            return None
 
     def calculate_indicators_for_stock(self, symbol, name, daily_dates, market_index):
         """특정 종목의 일별 지표를 계산합니다"""
@@ -295,45 +156,21 @@ class DailyStockFactorModel:
                 beta = float(info['beta'])
                 beta = min(max(beta, -2.0), 4.0)  # 이상치 방지
             else:
-                # Yahoo Finance API에서 베타값을 찾을 수 없는 경우
-                if symbol.endswith('.KS') or symbol.endswith('.KQ'):  # 한국 주식인 경우
-                    beta_from_naver = self.get_beta_from_naver_scraping(symbol)
-                    if beta_from_naver is not None:
-                        beta = beta_from_naver
-                        beta = min(max(beta, -2.0), 4.0)
-                    else:
-                        beta = self.default_beta_values.get(symbol, 1.0)
-                        print(f"{symbol}: 베타값 없음, 기본값 {beta} 사용")
-                else:
-                    beta = self.default_beta_values.get(symbol, 1.0)
-                    print(f"{symbol}: 베타값 없음, 기본값 {beta} 사용")
+                beta = 1.0
+                print(f"{symbol}: 베타값 없음, 기본값 1.0 사용")
 
             # PBR 값
-            if symbol.endswith('.KS'):  # 한국 종목
-                pbr = self.get_pbr_from_naver_scraping(symbol)
-                if pbr is None or pbr <= 0:
-                    if 'priceToBook' in info and info['priceToBook'] is not None and not pd.isna(info['priceToBook']):
-                        pbr = float(info['priceToBook'])
-                    else:
-                        pbr = 1.0
-                        print(f"{symbol}: PBR 정보 없음, 기본값 1.0 사용")
-            else:  # 미국 종목
-                if 'priceToBook' in info and info['priceToBook'] is not None and not pd.isna(info['priceToBook']):
-                    pbr = float(info['priceToBook'])
-                    print(f"{symbol}: Yahoo Finance에서 PBR값 {pbr:.4f} 가져옴")
-                else:
-                    pbr = 1.0
-                    print(f"{symbol}: PBR 정보 없음, 기본값 1.0 사용")
+            if 'priceToBook' in info and info['priceToBook'] is not None and not pd.isna(info['priceToBook']):
+                pbr = float(info['priceToBook'])
+                print(f"{symbol}: Yahoo Finance에서 PBR값 {pbr:.4f} 가져옴")
+            else:
+                pbr = 1.0
+                print(f"{symbol}: PBR 정보 없음, 기본값 1.0 사용")
 
             # 시가총액 처리
             if 'marketCap' in info and info['marketCap'] and not pd.isna(info['marketCap']):
                 market_cap = info['marketCap']
-                if symbol.endswith('.KS'):  # 한국 종목의 경우 KRW를 USD로 변환
-                    krw_to_usd = self.get_exchange_rate_krw_to_usd()
-                    market_cap = market_cap * krw_to_usd
-                    print(f"{symbol}: 시가총액 {info['marketCap']:,.0f} KRW → {market_cap:,.0f} USD로 변환")
-                else:
-                    print(f"{symbol}: 시가총액 {market_cap:,.0f} USD")
+                print(f"{symbol}: 시가총액 {market_cap:,.0f} USD")
             else:
                 market_cap = 1000000000  # 기본값: 10억 USD
 
@@ -342,7 +179,6 @@ class DailyStockFactorModel:
                 # 해당일 또는 그 이전 가장 가까운 거래일 찾기
                 available_dates = hist_data.index[hist_data.index <= pd.Timestamp(target_date)]
                 if len(available_dates) == 0:
-                    print(f"{symbol}: {target_date.strftime('%Y-%m-%d')}에 해당하는 데이터 없음")
                     continue
 
                 closest_date = available_dates.max()
@@ -444,36 +280,24 @@ class DailyStockFactorModel:
         """모든 종목에 대한 일별 지표를 계산합니다"""
         all_results = []
 
-        # 한국 주식 시장 일별 날짜 생성
-        kr_dates = self.generate_daily_dates('KRX')
-
-        # 미국 주식 시장 일별 날짜 생성
+        # 미국 주식 시장 일별 날짜 생성 (10년치)
         us_dates = self.generate_daily_dates('NYSE')
 
-        # 종목 목록 가져오기
-        if not self.kr_stocks:
-            self.get_korean_stocks()
+        # 스페이스 CSV에서 종목 목록 가져오기
+        if not self.stocks:
+            self.load_stocks_from_space_csv('stock_list.csv')
 
-        if not self.us_stocks:
-            self.get_us_stocks()
+        if not self.stocks:
+            print("처리할 종목이 없습니다!")
+            return pd.DataFrame()
 
-        # 한국 주식 처리
-        print("\n한국 주식 데이터 처리 중...")
-        for idx, stock in enumerate(self.kr_stocks, 1):
+        # 10개 종목 처리
+        print(f"\n{len(self.stocks)}개 종목의 10년치 데이터 처리 중...")
+        for idx, stock in enumerate(self.stocks, 1):
             symbol = stock['symbol']
             name = stock['name']
 
-            print(f"[{idx}/{len(self.kr_stocks)}] {name} ({symbol}) 처리 중...")
-            results = self.calculate_indicators_for_stock(symbol, name, kr_dates, '^KS11')
-            all_results.extend(results)
-
-        # 미국 주식 처리
-        print("\n미국 주식 데이터 처리 중...")
-        for idx, stock in enumerate(self.us_stocks, 1):
-            symbol = stock['symbol']
-            name = stock['name']
-
-            print(f"[{idx}/{len(self.us_stocks)}] {name} ({symbol}) 처리 중...")
+            print(f"[{idx}/{len(self.stocks)}] {name} ({symbol}) 처리 중...")
             results = self.calculate_indicators_for_stock(symbol, name, us_dates, '^GSPC')
             all_results.extend(results)
 
@@ -494,7 +318,6 @@ class DailyStockFactorModel:
             date_df = self.factor_model_data[self.factor_model_data['Date'] == date].copy()
 
             if len(date_df) < 5:  # 충분한 종목이 없으면 건너뜀
-                print(f"{date} 날짜에 충분한 종목 데이터가 없어 팩터 점수 계산을 건너뜁니다")
                 continue
 
             # 팩터 순위 계산 (퍼센타일로)
@@ -566,7 +389,7 @@ class DailyStockFactorModel:
 
         # CSV 저장
         date_str = self.current_date.strftime('%Y%m%d')
-        output_file = os.path.join(output_dir, f"processed_daily_5factor_model_{date_str}.csv")
+        output_file = os.path.join(output_dir, f"processed_daily_5factor_model_10stocks_10years_{date_str}.csv")
         self.factor_model_data.to_csv(output_file, index=False)
         print(f"\n데이터가 {output_file}에 저장되었습니다")
 
@@ -611,33 +434,18 @@ class DailyStockFactorModel:
 
         return self.factor_model_data
 
-    def check_and_remove_duplicates(self):
-        """중복 데이터를 확인하고 제거합니다"""
-        # 중복 확인
-        duplicates = self.factor_model_data.duplicated(subset=['Date', 'Symbol'], keep=False)
-
-        if duplicates.any():
-            print("\n발견된 중복 데이터:")
-            duplicate_data = self.factor_model_data[duplicates].sort_values(['Date', 'Symbol'])
-            print(duplicate_data[['Symbol', 'Name', 'Date']].to_string())
-
-            # 중복 제거
-            self.remove_duplicates()
-        else:
-            print("중복된 데이터가 없습니다")
-
-    def run_pipeline(self, kr_csv_path='KR_Stock_Master.csv', us_csv_path='US_Stock_Master.csv', output_dir='.'):
+    def run_pipeline(self, csv_path='stock_list.csv', output_dir='.'):
         """전체 데이터 파이프라인을 실행합니다"""
         print(f"시작 시간: {self.current_date.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"데이터 기간: {self.ten_years_ago.strftime('%Y-%m-%d')} ~ {self.current_date.strftime('%Y-%m-%d')}")
 
-        # 주식 목록 가져오기
-        self.get_korean_stocks(kr_csv_path)
-        self.get_us_stocks(us_csv_path)
+        # 스페이스 CSV에서 종목 목록 가져오기
+        self.load_stocks_from_space_csv(csv_path)
 
-        # 일별 지표 계산
+        # 일별 지표 계산 (10년치)
         self.calculate_all_indicators()
 
-        # 중복 제거 (팩터 점수 계산 전에 실행)
+        # 중복 제거
         self.remove_duplicates()
 
         # 팩터 점수 계산
@@ -657,11 +465,9 @@ def main():
     """메인 실행 함수"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='5-Factor Stock Model Data Preprocessing')
-    parser.add_argument('--kr-csv', type=str, default='KR_Stock_Master.csv',
-                       help='Path to Korean stock master CSV file')
-    parser.add_argument('--us-csv', type=str, default='US_Stock_Master.csv',
-                       help='Path to US stock master CSV file')
+    parser = argparse.ArgumentParser(description='5-Factor Stock Model - 10 Stocks, 10 Years')
+    parser.add_argument('--csv', type=str, default='stock_list.csv',
+                       help='Path to stock list CSV file (from Space)')
     parser.add_argument('--output-dir', type=str, default='.',
                        help='Output directory for processed data')
     
@@ -670,8 +476,7 @@ def main():
     # 모델 실행
     model = DailyStockFactorModel()
     result = model.run_pipeline(
-        kr_csv_path=args.kr_csv,
-        us_csv_path=args.us_csv,
+        csv_path=args.csv,
         output_dir=args.output_dir
     )
     
