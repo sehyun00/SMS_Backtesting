@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Data Preprocessing for 5-Factor Stock Model
-Converted from: data_preprocessing(5_19)이거쓸거임_ipynb의_사본.ipynb
+Converted from: data_preprocessing(11/26)한글주식제거_ipynb의_수정본.ipynb
 """
 
 import pandas as pd
@@ -41,7 +41,7 @@ class DailyStockFactorModel:
         # 현재 날짜 설정
         self.current_date = datetime.now()
         # 1년 전 날짜 계산
-        self.one_year_ago = self.current_date - relativedelta(years=1)
+        self.one_year_ago = self.current_date - relativedelta(years=10)
 
         # 미국 대표 주식 리스트
         self.us_stocks = []
@@ -60,23 +60,7 @@ class DailyStockFactorModel:
             'Volatility_Factor': 0.20
         }
 
-    def get_exchange_rate_krw_to_usd(self):
-        """KRW to USD 환율을 가져옵니다"""
-        try:
-            url = "https://api.exchangerate-api.com/v4/latest/USD"
-            response = requests.get(url)
-            data = response.json()
-
-            usd_to_krw = data['rates']['KRW']
-            krw_to_usd = 1 / usd_to_krw
-
-            print(f"현재 환율: 1 USD = {usd_to_krw:.2f} KRW, 1 KRW = {krw_to_usd:.8f} USD")
-            return krw_to_usd
-        except Exception as e:
-            print(f"환율 정보 가져오기 실패: {e}, 기본 환율 사용")
-            return 0.00077
-
-    def get_trading_days(self, start_date, end_date, market='KRX'):
+    def get_trading_days(self, start_date, end_date):
         """특정 기간의 모든 거래일을 찾습니다"""
         try:
             # 시장의 캘린더 생성
@@ -93,14 +77,14 @@ class DailyStockFactorModel:
             print(f"거래일 정보 가져오기 실패: {e}")
             return []
 
-    def generate_daily_dates(self, market='KRX'):
-        """지난 1년간의 모든 거래일 목록을 생성합니다"""
+    def generate_daily_dates(self, market='NYSE'):
+        """지난 10년간의 모든 거래일 목록을 생성합니다"""
         start_date = self.one_year_ago.strftime('%Y-%m-%d')
         end_date = self.current_date.strftime('%Y-%m-%d')
 
         trading_days = self.get_trading_days(start_date, end_date, market)
 
-        print(f"{market} 시장의 지난 1-년간 거래일 {len(trading_days)}개 찾음")
+        print(f"{market} 시장의 지난 10년간 거래일 {len(trading_days)}개 찾음")
 
         # 일별 날짜 저장
         self.daily_dates = trading_days
@@ -122,96 +106,6 @@ class DailyStockFactorModel:
 
         print(f"미국 주식 {len(self.us_stocks)}개 로드 완료")
         return self.us_stocks
-
-    def get_beta_from_naver_scraping(self, symbol):
-        """네이버 금융 웹 스크래핑으로 베타(Beta) 정보를 가져옵니다"""
-        try:
-            stock_code = symbol.split('.')[0]
-            url = f"https://finance.naver.com/item/main.naver?code={stock_code}"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
-            }
-
-            response = requests.get(url, headers=headers, timeout=(5, 30))
-            if response.status_code != 200:
-                return None
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # 베타값 찾기 시도 1: 테이블에서 베타값 찾기
-            beta_element = soup.select_one("table:contains('베타') td.num") or soup.select_one("table:contains('β') td.num")
-            if beta_element and beta_element.text.strip():
-                beta_text = beta_element.text.strip()
-                beta_text = ''.join(c for c in beta_text if c.isdigit() or c == '.' or c == '-')
-                if beta_text and beta_text != '-':
-                    beta = float(beta_text)
-                    if beta > 0:
-                        print(f"{symbol}: 네이버 금융에서 베타값 {beta:.4f} 가져옴")
-                        return beta
-
-            # 베타값 찾기 시도 2: 다른 방식으로 시도
-            aws_tables = soup.find_all("table", class_="aws")
-            for table in aws_tables:
-                rows = table.find_all("tr")
-                for row in rows:
-                    cols = row.find_all("td")
-                    for i, col in enumerate(cols):
-                        if '베타' in col.text or 'β' in col.text:
-                            if i+1 < len(cols) and cols[i+1].text.strip():
-                                beta_text = cols[i+1].text.strip()
-                                beta_text = ''.join(c for c in beta_text if c.isdigit() or c == '.' or c == '-')
-                                if beta_text and beta_text != '-':
-                                    beta = float(beta_text)
-                                    if beta > 0:
-                                        print(f"{symbol}: 네이버 금융에서 베타값 {beta:.4f} 가져옴")
-                                        return beta
-
-            return None
-        except Exception as e:
-            print(f"{symbol}: 베타값 스크래핑 중 오류 발생 - {e}")
-            return None
-
-    def get_pbr_from_naver_scraping(self, symbol):
-        """네이버 금융 웹 스크래핑으로 PBR 정보를 가져옵니다"""
-        try:
-            stock_code = symbol.split('.')[0]
-            url = f"https://finance.naver.com/item/main.naver?code={stock_code}"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
-            }
-
-            response = requests.get(url, headers=headers, timeout=(5, 30))
-            if response.status_code != 200:
-                return None
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-            pbr_element = soup.select_one("table:contains('PBR') td.num")
-            if pbr_element and pbr_element.text.strip():
-                pbr_text = pbr_element.text.strip()
-                pbr_text = ''.join(c for c in pbr_text if c.isdigit() or c == '.' or c == '-')
-                if pbr_text and pbr_text != '-':
-                    pbr = float(pbr_text)
-                    if pbr > 0:
-                        print(f"{symbol}: 네이버 금융에서 PBR값 {pbr:.4f} 가져옴")
-                        return pbr
-
-            # 다른 방식으로도 시도
-            pbr_selector = "#_pbr"
-            pbr_element = soup.select_one(pbr_selector)
-            if pbr_element and pbr_element.text.strip():
-                pbr_text = pbr_element.text.strip()
-                pbr_text = ''.join(c for c in pbr_text if c.isdigit() or c == '.' or c == '-')
-                if pbr_text and pbr_text != '-':
-                    pbr = float(pbr_text)
-                    if pbr > 0:
-                        print(f"{symbol}: 네이버 금융에서 PBR값 {pbr:.4f} 가져옴")
-                        return pbr
-
-            return None
-        except Exception:
-            return None
 
     def calculate_indicators_for_stock(self, symbol, name, daily_dates, market_index):
         """특정 종목의 일별 지표를 계산합니다"""
@@ -249,18 +143,9 @@ class DailyStockFactorModel:
                 beta = float(info['beta'])
                 beta = min(max(beta, -2.0), 4.0)  # 이상치 방지
             else:
-                # Yahoo Finance API에서 베타값을 찾을 수 없는 경우
-                if symbol.endswith('.KS') or symbol.endswith('.KQ'):  # 한국 주식인 경우
-                    beta_from_naver = self.get_beta_from_naver_scraping(symbol)
-                    if beta_from_naver is not None:
-                        beta = beta_from_naver
-                        beta = min(max(beta, -2.0), 4.0)
-                    else:
-                        beta = self.default_beta_values.get(symbol, 1.0)
-                        print(f"{symbol}: 베타값 없음, 기본값 {beta} 사용")
-                else:
-                    beta = self.default_beta_values.get(symbol, 1.0)
-                    print(f"{symbol}: 베타값 없음, 기본값 {beta} 사용")
+                # Yahoo Finance API에서 베타값을 찾을 수 없는 경우   
+                beta = self.default_beta_values.get(symbol, 1.0)
+                print(f"{symbol}: 베타값 없음, 기본값 {beta} 사용")
 
             # PBR 값
             if 'priceToBook' in info and info['priceToBook'] is not None and not pd.isna(info['priceToBook']):
@@ -387,10 +272,6 @@ class DailyStockFactorModel:
         # 미국 주식 시장 일별 날짜 생성
         us_dates = self.generate_daily_dates('NYSE')
 
-        # 종목 목록 가져오기
-        if not self.kr_stocks:
-            self.get_korean_stocks()
-
         if not self.us_stocks:
             self.get_us_stocks()
 
@@ -406,7 +287,6 @@ class DailyStockFactorModel:
 
         # 데이터프레임으로 변환
         self.factor_model_data = pd.DataFrame(all_results)
-
         return self.factor_model_data
 
     def calculate_factor_scores(self):
@@ -553,7 +433,7 @@ class DailyStockFactorModel:
         else:
             print("중복된 데이터가 없습니다")
 
-    def run_pipeline(self, kr_csv_path='KR_Stock_Master.csv', us_csv_path='US_Stock_Master.csv', output_dir='.'):
+    def run_pipeline(self, us_csv_path='US_Stock_Master.csv', output_dir='.'):
         """전체 데이터 파이프라인을 실행합니다"""
         print(f"시작 시간: {self.current_date.strftime('%Y-%m-%d %H:%M:%S')}")
 
