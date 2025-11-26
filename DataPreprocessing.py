@@ -112,143 +112,180 @@ class DailyStockFactorModel:
         return trading_days
 
     def calculate_indicators_for_stock(self, symbol, name, daily_dates, market_index):
-        """특정 종목의 일별 지표를 계산합니다"""
+        """
+        특정 종목의 일별 지표를 계산 (Rolling Beta + 벡터화)
+        - 출력 컬럼은 기존 코드와 동일하게 맞춤 (Beta, Momentum1M, ... 등)
+        """
+        import yfinance as yf
+        import pandas as pd
+        import numpy as np
+        from dateutil.relativedelta import relativedelta
+
         results = []
 
         try:
-            # 데이터 다운로드 기간 설정 (충분한 데이터를 위해 여유 있게 설정)
+            # -----------------------
+            # 1. 기간 설정 및 데이터 다운로드
+            # -----------------------
             start_date = min(daily_dates) - relativedelta(months=15)
             end_date = max(daily_dates) + relativedelta(days=5)
 
-            # 히스토리 데이터 다운로드
-            hist_data = yf.download(symbol, start=start_date, end=end_date, progress=False,
-                                   auto_adjust=False, multi_level_index=False)
-
-            time.sleep(1)
+            # 가격 데이터 (종목)
+            hist_data = yf.download(
+                symbol,
+                start=start_date,
+                end=end_date,
+                progress=False,
+                auto_adjust=False,
+                multi_level_index=False
+            )
 
             if len(hist_data) < 30:
                 print(f"{symbol}: 데이터가 충분하지 않습니다 (행 수: {len(hist_data)})")
                 return []
 
-            # 시장 지수 데이터 다운로드
-            index_data = yf.download(market_index, start=start_date, end=end_date, progress=False,
-                                    auto_adjust=False, multi_level_index=False)
+            # 벤치마크 지수 (Beta 계산용)
+            index_data = yf.download(
+                market_index,
+                start=start_date,
+                end=end_date,
+                progress=False,
+                auto_adjust=False,
+                multi_level_index=False
+            )
 
-            # 재무 정보 가져오기
+            # -----------------------
+            # 2. 재무 정보 (PBR, 시총, 섹터/산업) - 날짜에 따라 고정값
+            # -----------------------
             ticker_info = yf.Ticker(symbol)
             info = ticker_info.info
 
-            # 섹터, 산업 정보
             sector = info.get('sector', 'Unknown')
             industry = info.get('industry', 'Unknown')
 
-            # 베타값 가져오기
-            if 'beta' in info and info['beta'] is not None and not pd.isna(info['beta']):
-                beta = float(info['beta'])
-                beta = min(max(beta, -2.0), 4.0)  # 이상치 방지
-            else:
-                beta = 1.0
-                print(f"{symbol}: 베타값 없음, 기본값 1.0 사용")
-
-            # PBR 값
+            # PBR
             if 'priceToBook' in info and info['priceToBook'] is not None and not pd.isna(info['priceToBook']):
                 pbr = float(info['priceToBook'])
-                print(f"{symbol}: Yahoo Finance에서 PBR값 {pbr:.4f} 가져옴")
             else:
                 pbr = 1.0
-                print(f"{symbol}: PBR 정보 없음, 기본값 1.0 사용")
 
-            # 시가총액 처리
+            # 시가총액 (10억 단위로 변환)
             if 'marketCap' in info and info['marketCap'] and not pd.isna(info['marketCap']):
-                market_cap = info['marketCap']
-                print(f"{symbol}: 시가총액 {market_cap:,.0f} USD")
+                market_cap = info['marketCap'] / 1_000_000_000
             else:
-                market_cap = 1000000000  # 기본값: 10억 USD
+                market_cap = 1.0  # 10억 달러 기본값
 
-            # 각 일별 날짜에 대한 지표 계산
-            for target_date in daily_dates:
-                # 해당일 또는 그 이전 가장 가까운 거래일 찾기
-                available_dates = hist_data.index[hist_data.index <= pd.Timestamp(target_date)]
-                if len(available_dates) == 0:
-                    continue
+            # -----------------------
+            # 3. Rolling Beta 계산
+            # -----------------------
+            # 수익률 계산
+            hist_data['ret'] = hist_data['Adj Close'].pct_change()
+            index_data['mkt_ret'] = index_data['Adj Close'].pct_change()
 
-                closest_date = available_dates.max()
-                date_str = closest_date.strftime('%Y-%m-%d')
+            merged = pd.merge(
+                hist_data[['ret']],
+                index_data[['mkt_ret']],
+                left_index=True,
+                right_index=True,
+                how='inner'
+            )
 
-                # 해당 날짜까지의 데이터 추출
-                data_until_date = hist_data.loc[:closest_date]
+            rolling_cov = merged['ret'].rolling(window=252, min_periods=60).cov(merged['mkt_ret'])
+            rolling_var = merged['mkt_ret'].rolling(window=252, min_periods=60).var()
+            merged['beta'] = rolling_cov / rolling_var
 
-                # 모멘텀 계산
-                current_price = data_until_date['Adj Close'][-1]
+            # 원본 hist_data에 베타 매핑
+            hist_data['Beta'] = merged['beta'].reindex(hist_data.index)
+            hist_data['Beta'] = hist_data['Beta'].fillna(1.0)  # 초기 구간은 1.0으로
 
-                # 1개월 모멘텀
-                one_month_ago = closest_date - relativedelta(months=1)
-                one_month_prices = data_until_date[data_until_date.index <= one_month_ago]
-                momentum_1m = ((current_price / one_month_prices['Adj Close'][-1]) - 1) * 100 if len(one_month_prices) > 0 else 0
+            # -----------------------
+            # 4. 모멘텀 (1M, 3M, 6M, 12M) - 일단위 근사 (21, 63, 126, 252 거래일)
+            # -----------------------
+            # 현재 Adj Close 기준
+            adj = hist_data['Adj Close']
 
-                # 3개월 모멘텀
-                three_months_ago = closest_date - relativedelta(months=3)
-                three_month_prices = data_until_date[data_until_date.index <= three_months_ago]
-                momentum_3m = ((current_price / three_month_prices['Adj Close'][-1]) - 1) * 100 if len(three_month_prices) > 0 else 0
+            hist_data['Momentum1M'] = (adj / adj.shift(21) - 1) * 100
+            hist_data['Momentum3M'] = (adj / adj.shift(63) - 1) * 100
+            hist_data['Momentum6M'] = (adj / adj.shift(126) - 1) * 100
+            hist_data['Momentum12M'] = (adj / adj.shift(252) - 1) * 100
 
-                # 6개월 모멘텀
-                six_months_ago = closest_date - relativedelta(months=6)
-                six_month_prices = data_until_date[data_until_date.index <= six_months_ago]
-                momentum_6m = ((current_price / six_month_prices['Adj Close'][-1]) - 1) * 100 if len(six_month_prices) > 0 else 0
+            # -----------------------
+            # 5. 변동성 (30일 기준 연율화)
+            # -----------------------
+            daily_ret = adj.pct_change()
+            hist_data['Volatility'] = daily_ret.rolling(30).std() * np.sqrt(252) * 100
 
-                # 12개월 모멘텀
-                twelve_months_ago = closest_date - relativedelta(months=12)
-                twelve_month_prices = data_until_date[data_until_date.index <= twelve_months_ago]
-                momentum_12m = ((current_price / twelve_month_prices['Adj Close'][-1]) - 1) * 100 if len(twelve_month_prices) > 0 else 0
+            # -----------------------
+            # 6. RSI (14일)
+            # -----------------------
+            delta = adj.diff()
+            up = delta.where(delta > 0, 0.0)
+            down = (-delta).where(delta < 0, 0.0)
 
-                # 변동성 계산
-                returns = data_until_date['Adj Close'].pct_change().dropna()
-                volatility = returns.std() * np.sqrt(252) * 100 if len(returns) > 30 else 0  # 연간화, 퍼센트 변환
+            roll_up = up.rolling(window=14).mean()
+            roll_down = down.rolling(window=14).mean()
 
-                # RSI 계산
-                delta = data_until_date['Adj Close'].diff().dropna()
-                up = delta.copy()
-                up[up < 0] = 0
-                down = -delta.copy()
-                down[down < 0] = 0
+            rs = roll_up / roll_down.replace(0, 0.001)
+            rsi = 100 - (100 / (1 + rs))
+            hist_data['RSI'] = rsi
 
-                avg_gain = up.rolling(window=14).mean()
-                avg_loss = down.rolling(window=14).mean()
+            # -----------------------
+            # 7. MACD (12, 26, 9)
+            # -----------------------
+            exp1 = adj.ewm(span=12, adjust=False).mean()
+            exp2 = adj.ewm(span=26, adjust=False).mean()
+            macd = exp1 - exp2
+            signal = macd.ewm(span=9, adjust=False).mean()
+            hist = macd - signal
 
-                rs = avg_gain / avg_loss.replace(0, 0.001)  # 0으로 나누기 방지
-                rsi = 100 - (100 / (1 + rs))
-                rsi_value = rsi.iloc[-1]
+            hist_data['MACD'] = macd
+            hist_data['Signal'] = signal
+            hist_data['MACD_Hist'] = hist
 
-                # MACD 계산
-                exp1 = data_until_date['Adj Close'].ewm(span=12, adjust=False).mean()
-                exp2 = data_until_date['Adj Close'].ewm(span=26, adjust=False).mean()
-                macd = exp1 - exp2
-                signal = macd.ewm(span=9, adjust=False).mean()
-                hist = macd - signal
+            # -----------------------
+            # 8. daily_dates 기준으로 캘린더 맞추기 (가장 가까운 이전 거래일 값 사용)
+            # -----------------------
+            # 히스토리 index를 Datetime으로 보장
+            hist_data = hist_data.sort_index()
+            hist_data.index = pd.to_datetime(hist_data.index)
 
-                macd_value = macd.iloc[-1]
-                signal_value = signal.iloc[-1]
-                hist_value = hist.iloc[-1]
+            # 우리가 쓰려는 날짜 캘린더
+            calendar = pd.to_datetime(daily_dates)
+            calendar_df = pd.DataFrame(index=calendar)
 
-                # 결과 저장
+            # 캘린더에 hist_data를 맞추되, 가장 가까운 과거 값으로 forward-fill
+            feature_cols = [
+                'Beta', 'Momentum1M', 'Momentum3M', 'Momentum6M', 'Momentum12M',
+                'Volatility', 'RSI', 'MACD', 'Signal', 'MACD_Hist'
+            ]
+            feat = hist_data[feature_cols].reindex(calendar_df.index, method='ffill')
+
+            # 완전히 NaN인 초기 구간 제거
+            feat = feat.dropna(how='all')
+
+            # -----------------------
+            # 9. 결과 dict 리스트로 변환 (기존 키 그대로)
+            # -----------------------
+            for dt, row in feat.iterrows():
                 results.append({
                     'Symbol': symbol,
                     'Name': name,
-                    'Date': date_str,
-                    'Beta': round(beta, 2),
+                    'Date': dt.strftime('%Y-%m-%d'),
+                    'Beta': round(row['Beta'], 2) if not pd.isna(row['Beta']) else 1.0,
                     'PBR': round(pbr, 2),
-                    'MarketCap': round(market_cap / 1_000_000_000, 2),  # 10억 단위로 변환
-                    'Momentum1M': round(momentum_1m, 2),
-                    'Momentum3M': round(momentum_3m, 2),
-                    'Momentum6M': round(momentum_6m, 2),
-                    'Momentum12M': round(momentum_12m, 2),
-                    'Volatility': round(volatility, 2),
-                    'RSI': round(rsi_value, 2),
-                    'MACD': round(macd_value, 2),
-                    'Signal': round(signal_value, 2),
-                    'MACD_Hist': round(hist_value, 2),
+                    'MarketCap': round(market_cap, 2),  # 이미 10억 단위
+                    'Momentum1M': round(row['Momentum1M'], 2) if not pd.isna(row['Momentum1M']) else 0.0,
+                    'Momentum3M': round(row['Momentum3M'], 2) if not pd.isna(row['Momentum3M']) else 0.0,
+                    'Momentum6M': round(row['Momentum6M'], 2) if not pd.isna(row['Momentum6M']) else 0.0,
+                    'Momentum12M': round(row['Momentum12M'], 2) if not pd.isna(row['Momentum12M']) else 0.0,
+                    'Volatility': round(row['Volatility'], 2) if not pd.isna(row['Volatility']) else 0.0,
+                    'RSI': round(row['RSI'], 2) if not pd.isna(row['RSI']) else 0.0,
+                    'MACD': round(row['MACD'], 2) if not pd.isna(row['MACD']) else 0.0,
+                    'Signal': round(row['Signal'], 2) if not pd.isna(row['Signal']) else 0.0,
+                    'MACD_Hist': round(row['MACD_Hist'], 2) if not pd.isna(row['MACD_Hist']) else 0.0,
                     'Sector': sector,
                     'Industry': industry,
+                    # 아래 값들은 이후 calculate_factor_scores에서 다시 채움
                     'Beta_Factor': 0,
                     'Value_Factor': 0,
                     'Size_Factor': 0,
