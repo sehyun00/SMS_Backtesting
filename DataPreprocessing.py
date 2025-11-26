@@ -43,29 +43,13 @@ class DailyStockFactorModel:
         # 1년 전 날짜 계산
         self.one_year_ago = self.current_date - relativedelta(years=1)
 
-        # 한국/미국 대표 주식 리스트
-        self.kr_stocks = []
+        # 미국 대표 주식 리스트
         self.us_stocks = []
 
         # 데이터 저장용 변수
         self.stock_data = {}  # stock_data 속성 추가
         self.daily_dates = []
         self.factor_model_data = pd.DataFrame()
-
-        # 기본 베타값 딕셔너리 (API에서 가져오지 못할 경우 사용)
-        self.default_beta_values = {
-            '005935.KS': 0.85, '051910.KS': 1.25, '006400.KS': 1.30,
-            '035720.KS': 1.35, '028260.KS': 1.10, '066570.KS': 1.15,
-            '032830.KS': 0.80, '000810.KS': 0.75, '009150.KS': 1.05,
-            '018260.KS': 0.95, '017670.KS': 0.90, '034730.KS': 1.00,
-            '003550.KS': 1.10, '036570.KS': 1.40, '015760.KS': 0.65,
-            '259960.KS': 1.50, '009540.KS': 1.20, '005490.KS': 1.05,
-            '055550.KS': 0.95, '323410.KS': 1.30, '316140.KS': 0.85,
-            '086790.KS': 0.90, '097950.KS': 1.10, '030200.KS': 0.75,
-            '003670.KS': 1.15, '096770.KS': 1.25, '000100.KS': 0.80,
-            '033780.KS': 0.85, '138040.KS': 0.95, '139480.KS': 0.70,
-            '000020.KS': 0.83
-        }
 
         # 팩터 가중치 설정
         self.factor_weights = {
@@ -95,11 +79,8 @@ class DailyStockFactorModel:
     def get_trading_days(self, start_date, end_date, market='KRX'):
         """특정 기간의 모든 거래일을 찾습니다"""
         try:
-            # 해당 시장의 캘린더 생성
-            if market == 'KRX':
-                exchange = mcal.get_calendar('XKRX')
-            else:  # 미국 시장
-                exchange = mcal.get_calendar('NYSE')
+            # 시장의 캘린더 생성
+            exchange = mcal.get_calendar('NYSE')
 
             # 해당 기간의 거래일 가져오기
             trading_days = exchange.valid_days(start_date=start_date, end_date=end_date)
@@ -119,38 +100,11 @@ class DailyStockFactorModel:
 
         trading_days = self.get_trading_days(start_date, end_date, market)
 
-        print(f"{market} 시장의 지난 1년간 거래일 {len(trading_days)}개 찾음")
+        print(f"{market} 시장의 지난 1-년간 거래일 {len(trading_days)}개 찾음")
 
         # 일별 날짜 저장
         self.daily_dates = trading_days
         return trading_days
-
-    def get_korean_stocks(self, csv_path='KR_Stock_Master.csv'):
-        print("\n한국 대표 주식 가져오기...")
-        # CSV 파일 로드
-        df = pd.read_csv(csv_path, dtype={'Code': str})
-
-        # 종목코드 6자리로 맞추기
-        df['Code'] = df['Code'].str.zfill(6)
-
-        # Market에 따라 suffix 붙이기
-        def add_suffix(row):
-            market = str(row['Market']).strip().upper()
-            if market == 'KOSPI':
-                return row['Code'] + '.KS'
-            elif market == 'KOSDAQ' or market == 'KOSDAQ GLOBAL':
-                return row['Code'] + '.KQ'
-            else:
-                return row['Code']
-
-        df['symbol'] = df.apply(add_suffix, axis=1)
-        df['name'] = df['Name']
-
-        # 원하는 컬럼만 추출
-        self.kr_stocks = df[['symbol', 'name']].to_dict('records')
-
-        print(f"한국 주식 {len(self.kr_stocks)}개 로드 완료")
-        return self.kr_stocks
 
     def get_us_stocks(self, csv_path='US_Stock_Master.csv'):
         print("\n미국 대표 주식 가져오기...")
@@ -160,7 +114,7 @@ class DailyStockFactorModel:
         # 결측값 제거 (심볼이나 이름이 없는 행 제외)
         df = df[['ACT Symbol', 'Company Name']].dropna(subset=['ACT Symbol', 'Company Name'])
 
-        # 컬럼명 통일
+        # 컬럼명 통일 
         df = df.rename(columns={'ACT Symbol': 'symbol', 'Company Name': 'name'})
 
         # 딕셔너리 리스트로 변환
@@ -309,31 +263,17 @@ class DailyStockFactorModel:
                     print(f"{symbol}: 베타값 없음, 기본값 {beta} 사용")
 
             # PBR 값
-            if symbol.endswith('.KS'):  # 한국 종목
-                pbr = self.get_pbr_from_naver_scraping(symbol)
-                if pbr is None or pbr <= 0:
-                    if 'priceToBook' in info and info['priceToBook'] is not None and not pd.isna(info['priceToBook']):
-                        pbr = float(info['priceToBook'])
-                    else:
-                        pbr = 1.0
-                        print(f"{symbol}: PBR 정보 없음, 기본값 1.0 사용")
-            else:  # 미국 종목
-                if 'priceToBook' in info and info['priceToBook'] is not None and not pd.isna(info['priceToBook']):
-                    pbr = float(info['priceToBook'])
-                    print(f"{symbol}: Yahoo Finance에서 PBR값 {pbr:.4f} 가져옴")
-                else:
-                    pbr = 1.0
-                    print(f"{symbol}: PBR 정보 없음, 기본값 1.0 사용")
+            if 'priceToBook' in info and info['priceToBook'] is not None and not pd.isna(info['priceToBook']):
+                pbr = float(info['priceToBook'])
+                print(f"{symbol}: Yahoo Finance에서 PBR값 {pbr:.4f} 가져옴")
+            else:
+                pbr = 1.0
+                print(f"{symbol}: PBR 정보 없음, 기본값 1.0 사용")
 
             # 시가총액 처리
             if 'marketCap' in info and info['marketCap'] and not pd.isna(info['marketCap']):
                 market_cap = info['marketCap']
-                if symbol.endswith('.KS'):  # 한국 종목의 경우 KRW를 USD로 변환
-                    krw_to_usd = self.get_exchange_rate_krw_to_usd()
-                    market_cap = market_cap * krw_to_usd
-                    print(f"{symbol}: 시가총액 {info['marketCap']:,.0f} KRW → {market_cap:,.0f} USD로 변환")
-                else:
-                    print(f"{symbol}: 시가총액 {market_cap:,.0f} USD")
+                print(f"{symbol}: 시가총액 {market_cap:,.0f} USD")
             else:
                 market_cap = 1000000000  # 기본값: 10억 USD
 
@@ -444,9 +384,6 @@ class DailyStockFactorModel:
         """모든 종목에 대한 일별 지표를 계산합니다"""
         all_results = []
 
-        # 한국 주식 시장 일별 날짜 생성
-        kr_dates = self.generate_daily_dates('KRX')
-
         # 미국 주식 시장 일별 날짜 생성
         us_dates = self.generate_daily_dates('NYSE')
 
@@ -456,16 +393,6 @@ class DailyStockFactorModel:
 
         if not self.us_stocks:
             self.get_us_stocks()
-
-        # 한국 주식 처리
-        print("\n한국 주식 데이터 처리 중...")
-        for idx, stock in enumerate(self.kr_stocks, 1):
-            symbol = stock['symbol']
-            name = stock['name']
-
-            print(f"[{idx}/{len(self.kr_stocks)}] {name} ({symbol}) 처리 중...")
-            results = self.calculate_indicators_for_stock(symbol, name, kr_dates, '^KS11')
-            all_results.extend(results)
 
         # 미국 주식 처리
         print("\n미국 주식 데이터 처리 중...")
@@ -631,7 +558,6 @@ class DailyStockFactorModel:
         print(f"시작 시간: {self.current_date.strftime('%Y-%m-%d %H:%M:%S')}")
 
         # 주식 목록 가져오기
-        self.get_korean_stocks(kr_csv_path)
         self.get_us_stocks(us_csv_path)
 
         # 일별 지표 계산
@@ -658,8 +584,6 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='5-Factor Stock Model Data Preprocessing')
-    parser.add_argument('--kr-csv', type=str, default='KR_Stock_Master.csv',
-                       help='Path to Korean stock master CSV file')
     parser.add_argument('--us-csv', type=str, default='US_Stock_Master.csv',
                        help='Path to US stock master CSV file')
     parser.add_argument('--output-dir', type=str, default='.',
@@ -670,7 +594,6 @@ def main():
     # 모델 실행
     model = DailyStockFactorModel()
     result = model.run_pipeline(
-        kr_csv_path=args.kr_csv,
         us_csv_path=args.us_csv,
         output_dir=args.output_dir
     )
