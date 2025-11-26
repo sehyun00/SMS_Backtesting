@@ -60,29 +60,20 @@ class DailyStockFactorModel:
             'Volatility_Factor': 0.20
         }
 
-    def load_stocks_from_space_csv(self, csv_path='stock_list.csv'):
-        """스페이스에 저장된 CSV 파일에서 10개 종목 정보를 가져옵니다"""
-        print("\n스페이스 CSV 파일에서 종목 정보 가져오기...")
+    def load_stocks_from_csv(self, csv_path='stock_list.csv'):
+        """stock_list.csv 파일에서 10개 종목 정보를 가져옵니다"""
+        print(f"\n{csv_path} 파일에서 종목 정보 가져오기...")
         
         try:
             # CSV 파일 로드
             df = pd.read_csv(csv_path, encoding='utf-8')
             
-            # 컬럼명 확인 및 변환
-            if '티커' in df.columns:
-                df = df.rename(columns={
-                    '티커': 'symbol',
-                    '종목명': 'name',
-                    '섹터': 'sector',
-                    '세부 산업': 'industry'
-                })
-            
             # 종목 리스트로 변환
-            self.stocks = df[['symbol', 'name', 'sector', 'industry']].to_dict('records')
+            self.stocks = df[['ticker', 'name', 'sector', 'industry']].to_dict('records')
             
             print(f"총 {len(self.stocks)}개 종목 로드 완료:")
             for stock in self.stocks:
-                print(f"  - {stock['name']} ({stock['symbol']}): {stock['sector']} / {stock['industry']}")
+                print(f"  - {stock['name']} ({stock['ticker']}): {stock['sector']} / {stock['industry']}")
             
             return self.stocks
             
@@ -283,9 +274,9 @@ class DailyStockFactorModel:
         # 미국 주식 시장 일별 날짜 생성 (10년치)
         us_dates = self.generate_daily_dates('NYSE')
 
-        # 스페이스 CSV에서 종목 목록 가져오기
+        # CSV에서 종목 목록 가져오기
         if not self.stocks:
-            self.load_stocks_from_space_csv('stock_list.csv')
+            self.load_stocks_from_csv('stock_list.csv')
 
         if not self.stocks:
             print("처리할 종목이 없습니다!")
@@ -294,7 +285,7 @@ class DailyStockFactorModel:
         # 10개 종목 처리
         print(f"\n{len(self.stocks)}개 종목의 10년치 데이터 처리 중...")
         for idx, stock in enumerate(self.stocks, 1):
-            symbol = stock['symbol']
+            symbol = stock['ticker']
             name = stock['name']
 
             print(f"[{idx}/{len(self.stocks)}] {name} ({symbol}) 처리 중...")
@@ -439,8 +430,8 @@ class DailyStockFactorModel:
         print(f"시작 시간: {self.current_date.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"데이터 기간: {self.ten_years_ago.strftime('%Y-%m-%d')} ~ {self.current_date.strftime('%Y-%m-%d')}")
 
-        # 스페이스 CSV에서 종목 목록 가져오기
-        self.load_stocks_from_space_csv(csv_path)
+        # CSV에서 종목 목록 가져오기
+        self.load_stocks_from_csv(csv_path)
 
         # 일별 지표 계산 (10년치)
         self.calculate_all_indicators()
@@ -467,7 +458,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='5-Factor Stock Model - 10 Stocks, 10 Years')
     parser.add_argument('--csv', type=str, default='stock_list.csv',
-                       help='Path to stock list CSV file (from Space)')
+                       help='Path to stock list CSV file')
     parser.add_argument('--output-dir', type=str, default='.',
                        help='Output directory for processed data')
     
