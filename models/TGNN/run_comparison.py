@@ -9,10 +9,8 @@ from pathlib import Path
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import seaborn as sns
 
 from model import TGNNModel, TGNNDataset, train_model
-from backtesting import TGNNBacktester
 
 # 프로젝트 루트
 ROOT_DIR = Path(__file__).parent.parent.parent
@@ -288,7 +286,6 @@ def main(mode="compare"):
 
     feature_cols = [
         "Beta",
-        "PBR",
         "MarketCap",
         "Momentum1M",
         "Momentum6M",
