@@ -100,7 +100,7 @@ class TGNNDataset(Dataset):
         self.df = df.copy()
         self.df["Date"] = pd.to_datetime(self.df["Date"])
         self.window_size = window_size
-        self.symbols = symbols or sorted(df["Symbol"].unique())
+        self.symbols = symbols if symbols else sorted(df["Symbol"].unique())
         self.feature_cols = feature_cols
 
         # 월별 리샘플링
@@ -114,56 +114,96 @@ class TGNNDataset(Dataset):
         self.windows = self._create_windows()
 
     def _create_windows(self) -> List[Dict]:
+        """[수정] 동적 유니버스를 위한 윈도우 생성 함수"""
+        # 전체 기간의 날짜 목록
         dates = sorted(self.monthly_df["Date"].unique())
         windows = []
 
         for i in range(len(dates) - self.window_size):
+            # 1. 기간 설정
             window_dates = dates[i : i + self.window_size]
-            window_df = self.monthly_df[self.monthly_df["Date"].isin(window_dates)]
-
+            target_date = window_dates[-1]
             next_date = dates[i + self.window_size]
+
+            window_df = self.monthly_df[self.monthly_df["Date"].isin(window_dates)]
             next_df = self.monthly_df[self.monthly_df["Date"] == next_date]
 
-            if len(next_df) < len(self.symbols):
-                continue
-
-            # Features
+            # 2. Feature 및 Mask 생성
             features = []
+            active_mask = []
+
             for symbol in self.symbols:
-                stock_data = window_df[window_df["Symbol"] == symbol][
-                    self.feature_cols
-                ].values
+                stock_data = window_df[window_df["Symbol"] == symbol]
 
-                if len(stock_data) < self.window_size:
-                    pad_len = self.window_size - len(stock_data)
-                    stock_data = np.vstack(
-                        [np.zeros((pad_len, len(self.feature_cols))), stock_data]
+                # 현재 시점(target_date)에 데이터가 있는지 확인
+                is_active = not stock_data[stock_data["Date"] == target_date].empty
+
+                if is_active:
+                    # 데이터가 있으면 채워넣기 (상장 직후 패딩 포함)
+                    vals = stock_data[self.feature_cols].values
+                    if len(vals) < self.window_size:
+                        pad = np.zeros(
+                            (self.window_size - len(vals), len(self.feature_cols))
+                        )
+                        vals = np.vstack([pad, vals])
+                    features.append(vals)
+                    active_mask.append(True)
+                else:
+                    # 데이터 없으면(상장 전) 0으로 채움
+                    features.append(
+                        np.zeros((self.window_size, len(self.feature_cols)))
                     )
+                    active_mask.append(False)
 
-                features.append(stock_data)
-
-            features = np.array(features)
-
-            # Graph (마지막 월 기준)
-            adj_matrix = self._create_graph(
-                window_df[window_df["Date"] == window_dates[-1]]
+            # 3. 그래프 생성 (Masking 적용)
+            adj_matrix = self._create_masked_graph(
+                window_df[window_df["Date"] == target_date], np.array(active_mask)
             )
 
-            # Labels
-            labels = (
-                next_df.set_index("Symbol").reindex(self.symbols)["Momentum1M"].values
-            )
+            # 4. 라벨 생성 (없는 종목은 수익률 0)
+            labels = []
+            for symbol in self.symbols:
+                val = next_df[next_df["Symbol"] == symbol]["Momentum1M"].values
+                labels.append(val[0] if len(val) > 0 else 0.0)
 
             windows.append(
                 {
-                    "features": features,
-                    "adj_matrix": adj_matrix,
-                    "labels": labels,
-                    "date": window_dates[-1],
+                    "features": torch.FloatTensor(np.array(features)),
+                    "adj_matrix": torch.FloatTensor(adj_matrix),
+                    "labels": torch.FloatTensor(np.array(labels)),
+                    "date": target_date,
+                    "active_mask": np.array(active_mask),  # 백테스팅에 사용할 마스크
                 }
             )
 
         return windows
+
+    def _create_masked_graph(
+        self, snapshot_df: pd.DataFrame, active_mask: np.ndarray
+    ) -> np.ndarray:
+        """[신규] 마스킹을 적용한 그래프 생성 함수"""
+        n = len(self.symbols)
+        # 먼저 기존 _create_graph 호출
+        adj = (
+            self._create_graph(snapshot_df)
+            if not snapshot_df.empty
+            else np.zeros((n, n))
+        )
+
+        # active_mask를 이용해 존재하지 않는 종목의 연결을 모두 제거
+        mask_matrix = np.outer(active_mask, active_mask)
+        return adj * mask_matrix
+
+    # [수정] __getitem__에서 active_mask도 반환하도록 변경
+    def __getitem__(self, idx):
+        w = self.windows[idx]
+        # date는 DataLoader에서 문제를 일으키므로 제거
+        return {
+            "features": w["features"],
+            "adj_matrix": w["adj_matrix"],
+            "labels": w["labels"],
+            "active_mask": torch.BoolTensor(w["active_mask"]),  # BoolTensor로 변환
+        }
 
     def _create_graph(self, snapshot_df: pd.DataFrame) -> np.ndarray:
         """상관계수 × 산업 유사도"""
@@ -206,14 +246,6 @@ class TGNNDataset(Dataset):
 
     def __len__(self):
         return len(self.windows)
-
-    def __getitem__(self, idx):
-        w = self.windows[idx]
-        return {
-            "features": torch.FloatTensor(w["features"]),
-            "adj_matrix": torch.FloatTensor(w["adj_matrix"]),
-            "labels": torch.FloatTensor(w["labels"]),
-        }
 
 
 # ============ 학습 함수 ============

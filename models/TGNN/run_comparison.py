@@ -28,6 +28,22 @@ plt.rcParams["axes.unicode_minus"] = False
 # ============ 백테스팅 함수들 ============
 
 
+def softmax(x):
+    """배열을 확률 분포(합 1)로 변환"""
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()
+
+
+def custom_collate(batch):
+    """학습 데이터 로더용 콜레이트 함수"""
+    return {
+        "features": torch.stack([item["features"] for item in batch]),
+        "adj_matrix": torch.stack([item["adj_matrix"] for item in batch]),
+        "labels": torch.stack([item["labels"] for item in batch]),
+        # active_mask는 학습에서 제외
+    }
+
+
 def run_buy_and_hold(dataset):
     """1/N 매수 후 보유"""
     initial_capital = 1000000
@@ -54,7 +70,7 @@ def run_buy_and_hold(dataset):
 
 
 def run_tgnn_rebalancing(model, dataset, rebalance_freq="monthly"):
-    """TGNN 리밸런싱"""
+    """[수정] Dynamic Universe를 위한 TGNN 리밸런싱"""
     freq_map = {"monthly": 1, "quarterly": 3, "semiannual": 6, "annual": 12}
     interval = freq_map[rebalance_freq]
 
@@ -64,34 +80,52 @@ def run_tgnn_rebalancing(model, dataset, rebalance_freq="monthly"):
 
     portfolio_values = []
     dates = []
-    current_weights = None
+    # [수정] 초기 웨이트는 0으로 시작
+    current_weights = np.zeros(len(dataset.symbols))
 
     with torch.no_grad():
-        for idx, window in enumerate(dataset.windows):
+        # [수정] DataLoader 대신 dataset을 직접 순회
+        for idx in range(len(dataset)):
+            # DataLoader의 collate와 같은 역할을 직접 수행
+            batch = dataset[idx]
+
+            # 현재 시점의 날짜와 거래 가능 종목 마스크
+            date = dataset.windows[idx]["date"]
+            active_mask = batch["active_mask"].numpy()
+
             # 리밸런싱 시점
             if idx % interval == 0:
-                features = torch.FloatTensor(window["features"]).unsqueeze(0)
-                adj = torch.FloatTensor(window["adj_matrix"]).unsqueeze(0)
+                features = batch["features"].unsqueeze(0)
+                adj = batch["adj_matrix"].unsqueeze(0)
 
                 predictions, _ = model(features, adj)
                 pred_returns = predictions.squeeze(0).numpy()
 
-                current_weights = np.zeros(len(dataset.symbols))
-                top_k_idx = np.argsort(pred_returns)[-5:]
-                current_weights[top_k_idx] = 0.2
+                # [핵심] 상장 전 종목의 예측값을 -무한대로 설정하여 선택 방지
+                pred_returns[~active_mask] = -np.inf
 
-                print(
-                    f"[{rebalance_freq}] {window['date']} - 리밸런싱 #{idx // interval + 1}"
-                )
-                print(f"  선택 종목: {[dataset.symbols[i] for i in top_k_idx]}")
+                # 거래 가능한 종목 수
+                n_active = np.sum(active_mask)
+                # Top-K에서 k는 5와 거래 가능 종목 수 중 작은 값
+                k = min(5, n_active)
+
+                new_weights = np.zeros(len(dataset.symbols))
+                if k > 0:
+                    top_k_idx = np.argsort(pred_returns)[-k:]
+                    # new_weights[top_k_idx] = 1.0 / k
+
+                    top_scores = pred_returns[top_k_idx]
+                    new_weights[top_k_idx] = softmax(top_scores)
+
+                current_weights = new_weights
 
             # 수익 계산
-            actual_returns = window["labels"]
+            actual_returns = batch["labels"].numpy()
             portfolio_return = np.dot(current_weights, actual_returns)
             capital *= 1 + portfolio_return / 100
 
             portfolio_values.append(capital)
-            dates.append(window["date"])
+            dates.append(date)
 
     return {
         "dates": dates,
@@ -294,8 +328,17 @@ def main(mode="compare"):
             dataset, range(train_size, train_size + val_size)
         )
 
-        train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
-        val_loader = DataLoader(val_data, batch_size=32)
+        train_loader = DataLoader(
+            train_data,
+            batch_size=32,
+            shuffle=True,
+            collate_fn=custom_collate,
+        )
+        val_loader = DataLoader(
+            val_data,
+            batch_size=32,
+            collate_fn=custom_collate,
+        )
 
         train_model(
             model, train_loader, val_loader, num_epochs=300, save_path=str(model_path)
