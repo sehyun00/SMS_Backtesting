@@ -6,11 +6,11 @@
 
 ## 📖 프로젝트 개요
 
-본 저장소는 연구 논문 **"TGNN-DDPG 하이브리드 모델을 활용한 포트폴리오 리밸런싱 전략 강화"**의 구현 및 백테스팅 프레임워크입니다.
+본 저장소는 연구 논문 **"TGNN-DDPG 하이브리드 모델을 활용한 포트폴리오 리밸런싱 전략 강화"** 의 구현 및 백테스팅 프레임워크입니다.
 
 ### 연구 배경
 
-전통적인 포트폴리오 최적화 방법론은 정적 분석에 의존하며, 시장의 동적 변화를 충분히 반영하지 못합니다. 본 연구는 **시계열 그래프 신경망(TGNN)**과 **심층 강화학습(DDPG)**을 결합하여 다음을 달성합니다:
+전통적인 포트폴리오 최적화 방법론은 정적 분석에 의존하며, 시장의 동적 변화를 충분히 반영하지 못합니다. 본 연구는 **시계열 그래프 신경망 (TGNN)** 과 **심층 강화학습 (DDPG)** 을 결합하여 다음을 달성합니다:
 
 - 주식 간 복잡한 시간적 상관관계를 그래프 구조로 학습
 - 시장 변화에 따른 동적 포트폴리오 리밸런싱
@@ -20,15 +20,15 @@
 
 제안하는 하이브리드 모델의 성능을 검증하기 위해 세 가지 모델을 비교합니다:
 
-1. **TGNN-Only**: 시계열 그래프 신경망을 이용한 종목 간 관계 분석 및 순위 예측
-2. **DDPG-Only**: 심층 결정론적 정책 그래디언트를 이용한 동적 비중 최적화
+1. **TGNN-Only** : 시계열 그래프 신경망을 이용한 종목 간 관계 분석 및 순위 예측
+2. **DDPG-Only** : 심층 결정론적 정책 그래디언트를 이용한 동적 비중 최적화
 3. **Hybrid (TGNN+DDPG)** ⭐: TGNN의 잠재 특징을 DDPG가 활용하는 제안 모델
 
 ---
 
 ## 📂 디렉토리 구조
 
-실험의 재현성(Reproducibility)과 모델 간 명확한 비교를 위해 다음과 같이 구조화되었습니다.
+실험의 재현성 (Reproducibility) 과 모델 간 명확한 비교를 위해 다음과 같이 구조화되었습니다.
 
 ```
 SMS_Backtesting/
@@ -62,7 +62,7 @@ SMS_Backtesting/
 
 ### 연구 방법론
 
-무료 금융 데이터(Yahoo Finance)의 제약사항을 극복하고 강화학습 에이전트에 **고빈도 시장 역학(High-frequency Market Dynamics)** 정보를 제공하기 위해, **가격 및 거래량 기반의 기술적 대용 지표(Technical Proxies)**를 5-Factor로 재정의하였습니다.
+무료 금융 데이터 (Yahoo Finance) 의 제약사항을 극복하고 강화학습 에이전트에 **고빈도 시장 역학 (High-frequency Market Dynamics)** 정보를 제공하기 위해, **가격 및 거래량 기반의 기술적 대용 지표 (Technical Proxies)** 를 5-Factor로 재정의하였습니다.
 
 ### 🛠️ 5-Factor 정의
 
@@ -76,7 +76,7 @@ SMS_Backtesting/
 | **Volatility** | 이익 변동성 | **Low Volatility**<br>`1 - Rank(일일 변동성)` | 안정적 자산을 선호하도록 학습 유도 |
 | **Beta** | 시장 베타 | **Low Beta**<br>`1 - Rank(1년 롤링 베타)` | 하락장에서 방어주 성격 종목 선별 |
 
-> **정규화 방법**: 모든 팩터는 `Rank(pct=True)`를 통해 0.0 ~ 1.0 사이로 정규화되며, 매일 날짜별 횡단면(Cross-Sectional) 상대 순위를 사용하여 그래프 신경망의 관계 학습에 최적화되었습니다.
+> **정규화 방법** : 모든 팩터는 `Rank(pct=True)`를 통해 0.0 ~ 1.0 사이로 정규화되며, 매일 날짜별 횡단면 (Cross-Sectional) 상대 순위를 사용하여 그래프 신경망의 관계 학습에 최적화되었습니다.
 
 ---
 
@@ -84,40 +84,40 @@ SMS_Backtesting/
 
 ### 백테스팅 기간 및 대상
 
-- **기간**: 2015년 1월 ~ 2025년 11월 (약 10년)
-- **대상 종목**: NYSE/NASDAQ 상위 10개 기술주 및 우량주
+- **기간** : 2015년 1월 ~ 2025년 11월 (약 10년)
+- **대상 종목** : NYSE/NASDAQ 상위 10개 기술주 및 우량주
   - AAPL (Apple), MSFT (Microsoft), NVDA (NVIDIA), TSLA (Tesla) 등
-- **리밸런싱 주기**: 월간 (Monthly)
-- **초기 자본**: $10,000
+- **리밸런싱 주기** : 월간 (Monthly)
+- **초기 자본** : $10,000
 
 ### 모델별 상세 설명
 
 #### 1. TGNN-Only 모델
 
-**목적**: 주식 간 상관관계를 그래프로 모델링하여 미래 순위 예측
+**목적** : 주식 간 상관관계를 그래프로 모델링하여 미래 순위 예측
 
-**핵심 메커니즘**:
-- 노드(Node): 개별 종목
-- 엣지(Edge): 종목 간 상관관계 (동적 계산)
+**핵심 메커니즘** :
+- 노드 (Node): 개별 종목
+- 엣지 (Edge): 종목 간 상관관계 (동적 계산)
 - 출력: 다음 기간 종목 순위 예측
 
 #### 2. DDPG-Only 모델
 
-**목적**: 시장 상태에 따른 최적 포트폴리오 비중 결정
+**목적** : 시장 상태에 따른 최적 포트폴리오 비중 결정
 
-**핵심 메커니즘**:
+**핵심 메커니즘** :
 - State: 5-Factor 시계열 데이터
 - Action: 각 종목의 투자 비중 (연속 공간)
 - Reward: Sharpe Ratio 기반 위험 조정 수익률
 
 #### 3. Hybrid (TGNN+DDPG) 모델 ⭐ **(제안 방법)**
 
-**목적**: TGNN의 관계 추출과 DDPG의 동적 최적화 결합
+**목적** : TGNN의 관계 추출과 DDPG의 동적 최적화 결합
 
-**핵심 메커니즘**:
-1. **Feature Extraction**: TGNN이 시장 데이터에서 종목 간 잠재 특징(Latent Features) 추출
-2. **Policy Optimization**: DDPG가 추출된 특징을 State로 받아 최종 투자 비중 결정
-3. **End-to-End Learning**: 두 모델이 통합 손실 함수로 동시 학습
+**핵심 메커니즘** :
+1. **Feature Extraction** : TGNN이 시장 데이터에서 종목 간 잠재 특징 (Latent Features) 추출
+2. **Policy Optimization** : DDPG가 추출된 특징을 State로 받아 최종 투자 비중 결정
+3. **End-to-End Learning** : 두 모델이 통합 손실 함수로 동시 학습
 
 ---
 
@@ -174,20 +174,20 @@ python models/Hybrid_TGNN_DDPG/train.py
 ### 평가 지표
 
 - **CAGR** (Compound Annual Growth Rate): 연평균 성장률
-- **Sharpe Ratio**: 위험 조정 수익률
+- **Sharpe Ratio** : 위험 조정 수익률
 - **MDD** (Maximum Drawdown): 최대 낙폭
-- **Win Rate**: 수익 발생 거래 비율
-- **Volatility**: 포트폴리오 변동성
+- **Win Rate** : 수익 발생 거래 비율
+- **Volatility** : 포트폴리오 변동성
 
 ---
 
 ## 🔬 기술 스택
 
-- **Deep Learning**: PyTorch, PyTorch Geometric
-- **Reinforcement Learning**: Stable-Baselines3, Gym
-- **Data Processing**: Pandas, NumPy
-- **Visualization**: Matplotlib, Seaborn
-- **Financial Data**: yfinance
+- **Deep Learning** : PyTorch, PyTorch Geometric
+- **Reinforcement Learning** : Stable-Baselines3, Gym
+- **Data Processing** : Pandas, NumPy
+- **Visualization** : Matplotlib, Seaborn
+- **Financial Data** : yfinance
 
 ---
 
@@ -209,8 +209,8 @@ python models/Hybrid_TGNN_DDPG/train.py
 
 ## 👥 기여자
 
-- **연구진**: SMS 연구팀
-- **논문 링크**: [Notion 연구 문서](https://www.notion.so/Temporal-Graph-Neural-Network-2a082e91118d809aa283fb97ed6c4ac9)
+- **연구진** : SMS 연구팀
+- **논문 링크** : [Notion 연구 문서](https://www.notion.so/Temporal-Graph-Neural-Network-2a082e91118d809aa283fb97ed6c4ac9)
 
 ---
 
@@ -222,9 +222,9 @@ python models/Hybrid_TGNN_DDPG/train.py
 
 ## 🔄 업데이트 이력
 
-- **2025.11.28**: README.md 구조화 및 내용 보완
-- **2025.11.XX**: 초기 프로젝트 생성
+- **2025.11.28** : README.md 구조화 및 내용 보완
+- **2025.11.XX** : 초기 프로젝트 생성
 
 ---
 
-**⚠️ 면책 조항**: 본 프로젝트는 학술 연구 목적으로 제작되었으며, 실제 투자 조언이 아닙니다. 투자 결정에 대한 모든 책임은 투자자 본인에게 있습니다.
+**⚠️ 면책 조항** : 본 프로젝트는 학술 연구 목적으로 제작되었으며, 실제 투자 조언이 아닙니다. 투자 결정에 대한 모든 책임은 투자자 본인에게 있습니다.
