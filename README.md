@@ -43,6 +43,10 @@ SMS_Backtesting/
 │
 ├── 📁 models/                            # 모델 구현체
 │   ├── 📁 TGNN/                          # 비교군 1: 그래프 신경망 단독 모델
+│   │   ├── model.py                      # TGNN (T-GCN + GRU + Attention) 모델 정의
+│   │   ├── run_comparison.py             # 모델 학습 및 벤치마크 비교 실행 스크립트
+│   │   ├── visualization.py              # 결과 시각화 (수익률, Loss 등)
+│   │   └── best_tgnn.pth                 # 학습된 최적 모델 가중치
 │   ├── 📁 DDPG/                          # 비교군 2: 강화학습 단독 모델
 │   └── 📁 Hybrid_TGNN_DDPG/              # 제안 모델 (Main Method)
 │
