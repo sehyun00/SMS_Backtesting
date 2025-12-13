@@ -86,13 +86,20 @@ SMS_Backtesting/
 
 ## 🧪 실험 설정
 
-### 백테스팅 기간 및 대상
+### 백테스팅 기간 및 검증 방법
 
-- **기간** : 2015년 1월 ~ 2025년 11월 (약 10년)
+본 프로젝트는 **가장 학술적으로 공정하고 엄격한** 검증 방식을 채택합니다.
+
+- **전체 기간** : 2015년 1월 ~ 2025년 11월 (약 11년)
+- **학습 (Train)** : **2015년 ~ 2017년 (3년)**
+  - 초기 모델 학습 및 하이퍼파라미터 튜닝
+- **테스트 (Test)** : **2018년 ~ 2025년 (8년)**
+  - 실전 투자 시뮬레이션 (Out-of-Sample)
+  - 학습 기간의 데이터는 일절 참조하지 않음 (Look-ahead Bias 방지)
 - **대상 종목** : NYSE/NASDAQ 상위 10개 기술주 및 우량주
-  - AAPL (Apple), MSFT (Microsoft), NVDA (NVIDIA), TSLA (Tesla) 등
+  - AAPL, MSFT, NVDA, TSLA, GOOGL, AMZN, META, UNH, PLTR, IONQ
 - **리밸런싱 주기** : 월간 (Monthly)
-- **초기 자본** : $10,000
+- **초기 자본** : $1,000,000
 
 ### 모델별 상세 설명
 
@@ -110,9 +117,9 @@ SMS_Backtesting/
 **목적** : 시장 상태에 따른 최적 포트폴리오 비중 결정
 
 **핵심 메커니즘** :
-- State: 5-Factor 시계열 데이터
-- Action: 각 종목의 투자 비중 (연속 공간)
-- Reward: Sharpe Ratio 기반 위험 조정 수익률
+- State: 10개 종목의 5-Factor 시계열 데이터 (Factor-Aware)
+- Action: 각 종목의 투자 비중 (Continuous Control)
+- Reward: **CRRA Utility Function** (위험 회피 및 거래비용 최적화)
 
 #### 3. Hybrid (TGNN+DDPG) 모델 ⭐ **(제안 방법)**
 
@@ -177,11 +184,26 @@ python models/Hybrid_TGNN_DDPG/train.py
 
 ### 평가 지표
 
-- **CAGR** (Compound Annual Growth Rate): 연평균 성장률
-- **Sharpe Ratio** : 위험 조정 수익률
-- **MDD** (Maximum Drawdown): 최대 낙폭
-- **Win Rate** : 수익 발생 거래 비율
-- **Volatility** : 포트폴리오 변동성
+### 평가 지표
+
+본 연구는 단순 수익률 외에 다양한 리스크 및 비용 지표를 종합적으로 평가합니다.
+
+**1. 수익성 (Profitability)**
+- **CAGR** (Compound Annual Growth Rate): 연평균 복리 수익률
+- **Cumulative Return**: 누적 수익률
+
+**2. 안정성 (Stability)**
+- **MDD** (Maximum Drawdown): 최대 자본 인하율 (낙폭)
+- **Volatility**: 포트폴리오 변동성 (연율화)
+
+**3. 효율성 (Efficiency)**
+- **Sharpe Ratio**: 위험 대비 초과 수익 (무위험 수익률 대비)
+- **Sortino Ratio**: 하방 변동성(Downside Deviation) 대비 초과 수익
+- **Calmar Ratio**: MDD 대비 연평균 수익률
+
+**4. 거래 특성 (Trading Characteristics)**
+- **Turnover**: 포트폴리오 회전율 (리밸런싱 강도)
+- **Transaction Cost**: 거래 비용 (슬리피지 및 수수료 반영)
 
 ---
 

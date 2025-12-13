@@ -1,0 +1,52 @@
+[
+    {
+        "Strategy":"1\/N Buy & Hold",
+        "Final_Value":10350156.8991218675,
+        "CAGR":35.3795967139,
+        "MDD":44.5176363014,
+        "Sharpe":1.209856611,
+        "Sortino":2.2472726011,
+        "Volatility":29.242800495,
+        "Avg_Turnover":0.0
+    },
+    {
+        "Strategy":"DDPG (monthly)",
+        "Final_Value":23811219.7866768427,
+        "CAGR":50.9248769033,
+        "MDD":59.1670699892,
+        "Sharpe":1.0508432562,
+        "Sortino":1.7231568665,
+        "Volatility":48.4609627105,
+        "Avg_Turnover":0.6951174527
+    },
+    {
+        "Strategy":"DDPG (quarterly)",
+        "Final_Value":21700794.3922461867,
+        "CAGR":49.1278618714,
+        "MDD":59.0523020471,
+        "Sharpe":1.017306988,
+        "Sortino":1.6790563044,
+        "Volatility":48.2920705687,
+        "Avg_Turnover":0.2761439406
+    },
+    {
+        "Strategy":"DDPG (semiannual)",
+        "Final_Value":17987937.3731805123,
+        "CAGR":45.5595980251,
+        "MDD":59.2508001261,
+        "Sharpe":0.9506296406,
+        "Sortino":1.5490793502,
+        "Volatility":47.9257064267,
+        "Avg_Turnover":0.2448107615
+    },
+    {
+        "Strategy":"DDPG (annual)",
+        "Final_Value":20285226.0943208225,
+        "CAGR":47.8351724633,
+        "MDD":57.9848992534,
+        "Sharpe":1.021538114,
+        "Sortino":1.7219088501,
+        "Volatility":46.8266144791,
+        "Avg_Turnover":0.2365319355
+    }
+]
