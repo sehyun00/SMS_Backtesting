@@ -1,3 +1,4 @@
+
 """
 Hybrid TGNN-DDPG 학습 및 성과 비교 스크립트
 - TGNN의 그래프 생성 로직과 DDPG의 강화학습 로직을 결합하여 학습 및 테스트를 수행합니다.
@@ -223,11 +224,15 @@ class HybridPortfolioEnv:
         self.n_stocks = len(dataset.symbols)
         self.prev_weights = np.zeros(self.n_stocks)
         
+        # Sharpe Ratio 계산을 위한 수익률 히스토리
+        self.return_history = []
+        
     def reset(self):
         """환경 초기화"""
         self.current_step = 0
         self.portfolio_value = self.initial_cash
         self.prev_weights = np.zeros(self.n_stocks)
+        self.return_history = []  # 수익률 히스토리 초기화
         return self._get_state(0) 
 
     def _get_state(self, idx):
@@ -260,11 +265,22 @@ class HybridPortfolioEnv:
         self.current_step += 1
         done = (self.current_step >= self.n_steps)
         
-        # 보상 함수 (CRRA Utility)
-        # - 위험(변동성)을 고려한 효용 함수 사용
-        safe_return = max(net_return, -0.99) # -100% 손실 방지
-        exponent = 1.0 - self.gamma
-        reward = ((1.0 + safe_return) ** exponent) / exponent
+        # 보상 함수 (Sharpe Ratio 기반)
+        # - 수익률을 기록하고 변동성 대비 수익률을 보상으로 사용
+        self.return_history.append(net_return)
+        
+        if len(self.return_history) >= 3:
+            # Sharpe Ratio 계산: mean(returns) / std(returns)
+            returns_array = np.array(self.return_history)
+            mean_return = np.mean(returns_array)
+            std_return = np.std(returns_array) + 1e-8  # 0으로 나누기 방지
+            sharpe = mean_return / std_return
+            
+            # 보상 = Sharpe Ratio (연율화 계수 생략, 상대 비교이므로)
+            reward = sharpe
+        else:
+            # 초기 몇 스텝은 단순 수익률 사용
+            reward = net_return * 10  # 스케일 조정
         
         self.prev_weights = action
         # 다음 상태 반환 (종료 시 0 벡터)
