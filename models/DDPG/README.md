@@ -120,7 +120,7 @@ models/DDPG/
 2015~2017년 데이터로 DDPG 에이전트를 학습시킵니다.
 
 ```bash
-python run_comparison.py train
+python models/DDPG/run_comparison.py train
 ```
 
 - 학습이 완료되면 `best_ddpg.pth` 파일이 생성됩니다.
@@ -129,7 +129,7 @@ python run_comparison.py train
 2018~2025년 데이터에 대해 실전 투자를 시뮬레이션합니다.
 
 ```bash
-python run_comparison.py compare
+python models/DDPG/run_comparison.py compare
 ```
 
 - **결과물** :

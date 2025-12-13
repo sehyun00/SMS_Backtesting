@@ -11,42 +11,42 @@
     },
     {
         "Strategy":"DDPG (monthly)",
-        "Final_Value":23811219.7866768427,
-        "CAGR":50.9248769033,
-        "MDD":59.1670699892,
-        "Sharpe":1.0508432562,
-        "Sortino":1.7231568665,
-        "Volatility":48.4609627105,
-        "Avg_Turnover":0.6951174527
+        "Final_Value":16185778.6747880839,
+        "CAGR":43.2254360215,
+        "MDD":38.4531811673,
+        "Sharpe":1.3391293945,
+        "Sortino":2.3338652092,
+        "Volatility":32.2787587669,
+        "Avg_Turnover":4.5544947502
     },
     {
         "Strategy":"DDPG (quarterly)",
-        "Final_Value":21700794.3922461867,
-        "CAGR":49.1278618714,
-        "MDD":59.0523020471,
-        "Sharpe":1.017306988,
-        "Sortino":1.6790563044,
-        "Volatility":48.2920705687,
-        "Avg_Turnover":0.2761439406
+        "Final_Value":14013560.8489388656,
+        "CAGR":40.5862009739,
+        "MDD":44.7420214799,
+        "Sharpe":1.2603494333,
+        "Sortino":2.1293768382,
+        "Volatility":32.2023390041,
+        "Avg_Turnover":1.3710503867
     },
     {
         "Strategy":"DDPG (semiannual)",
-        "Final_Value":17987937.3731805123,
-        "CAGR":45.5595980251,
-        "MDD":59.2508001261,
-        "Sharpe":0.9506296406,
-        "Sortino":1.5490793502,
-        "Volatility":47.9257064267,
-        "Avg_Turnover":0.2448107615
+        "Final_Value":12256045.2532234918,
+        "CAGR":38.1756233684,
+        "MDD":47.8787727416,
+        "Sharpe":1.2176750045,
+        "Sortino":2.0574302011,
+        "Volatility":31.3512406924,
+        "Avg_Turnover":0.8251567174
     },
     {
         "Strategy":"DDPG (annual)",
-        "Final_Value":20285226.0943208225,
-        "CAGR":47.8351724633,
-        "MDD":57.9848992534,
-        "Sharpe":1.021538114,
-        "Sortino":1.7219088501,
-        "Volatility":46.8266144791,
-        "Avg_Turnover":0.2365319355
+        "Final_Value":12713776.8639334515,
+        "CAGR":38.8310700254,
+        "MDD":45.5521692282,
+        "Sharpe":1.2129138706,
+        "Sortino":1.973591182,
+        "Volatility":32.0146959765,
+        "Avg_Turnover":0.4530432522
     }
 ]
