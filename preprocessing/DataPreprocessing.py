@@ -36,13 +36,13 @@ warnings.filterwarnings("ignore")
 
 class DailyStockFactorModel:
     def __init__(self):
-        print("일별 5팩터 모델 데이터 처리 시작 (10년치)")
+        print("일별 5팩터 모델 데이터 처리 시작 (15년치)")
         self.start_time = time.time()
 
         # 현재 날짜 설정
         self.current_date = datetime.now()
-        # 10년 전 날짜 계산
-        self.ten_years_ago = self.current_date - relativedelta(years=10)
+        # 15년 전 날짜 계산
+        self.fifteen_years_ago = self.current_date - relativedelta(years=15)
 
         # 종목 리스트
         self.stocks = []
@@ -104,13 +104,17 @@ class DailyStockFactorModel:
             return []
 
     def generate_daily_dates(self, market="NYSE"):
-        """지난 10년간의 모든 거래일 목록을 생성합니다"""
-        start_date = self.ten_years_ago.strftime("%Y-%m-%d")
+        """지난 15년간의 모든 거래일 목록을 생성합니다"""  # 10년 → 15년
+        start_date = self.fifteen_years_ago.strftime(
+            "%Y-%m-%d"
+        )  # ten_years_ago → fifteen_years_ago
         end_date = self.current_date.strftime("%Y-%m-%d")
 
         trading_days = self.get_trading_days(start_date, end_date, market)
 
-        print(f"{market} 시장의 지난 10년간 거래일 {len(trading_days)}개 찾음")
+        print(
+            f"{market} 시장의 지난 15년간 거래일 {len(trading_days)}개 찾음"
+        )  # 10년 → 15년
 
         # 일별 날짜 저장
         self.daily_dates = trading_days
@@ -345,7 +349,7 @@ class DailyStockFactorModel:
         """모든 종목에 대한 일별 지표를 계산합니다"""
         all_results = []
 
-        # 미국 주식 시장 일별 날짜 생성 (10년치)
+        # 미국 주식 시장 일별 날짜 생성 (15년치)
         us_dates = self.generate_daily_dates("NYSE")
 
         # CSV에서 종목 목록 가져오기
@@ -357,7 +361,7 @@ class DailyStockFactorModel:
             return pd.DataFrame()
 
         # 10개 종목 처리
-        print(f"\n{len(self.stocks)}개 종목의 10년치 데이터 처리 중...")
+        print(f"\n{len(self.stocks)}개 종목의 15년치 데이터 처리 중...")
         for idx, stock in enumerate(self.stocks, 1):
             symbol = stock["ticker"]
             name = stock["name"]
@@ -599,13 +603,13 @@ class DailyStockFactorModel:
         """전체 데이터 파이프라인을 실행합니다"""
         print(f"시작 시간: {self.current_date.strftime('%Y-%m-%d %H:%M:%S')}")
         print(
-            f"데이터 기간: {self.ten_years_ago.strftime('%Y-%m-%d')} ~ {self.current_date.strftime('%Y-%m-%d')}"
+            f"데이터 기간: {self.fifteen_years_ago.strftime('%Y-%m-%d')} ~ {self.current_date.strftime('%Y-%m-%d')}"  # ten_years_ago → fifteen_years_ago
         )
 
         # CSV에서 종목 목록 가져오기
         self.load_stocks_from_csv(csv_path)
 
-        # 일별 지표 계산 (10년치)
+        # 일별 지표 계산 (15년치)  # 주석도 수정
         self.calculate_all_indicators()
 
         # 중복 제거
@@ -627,17 +631,25 @@ class DailyStockFactorModel:
 def main():
     """메인 실행 함수"""
     import argparse
+    from pathlib import Path
+
+    # 🔥 스크립트 위치 기준 절대 경로 계산
+    SCRIPT_DIR = Path(__file__).parent  # preprocessing 폴더
+    PROJECT_ROOT = SCRIPT_DIR.parent  # SMS_Backtesting 폴더
 
     parser = argparse.ArgumentParser(
-        description="5-Factor Stock Model - 10 Stocks, 10 Years"
+        description="5-Factor Stock Model - 10 Stocks, 15 Years"
     )
     parser.add_argument(
-        "--csv", type=str, default="stock_list.csv", help="Path to stock list CSV file"
+        "--csv",
+        type=str,
+        default=str(PROJECT_ROOT / "data" / "stock_list.csv"),  # 🔥 절대 경로
+        help="Path to stock list CSV file",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default=".",
+        default=str(PROJECT_ROOT / "data"),  # 🔥 절대 경로
         help="Output directory for processed data",
     )
 
