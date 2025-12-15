@@ -123,7 +123,7 @@ class DailyStockFactorModel:
     def calculate_indicators_for_stock(self, symbol, name, daily_dates, market_index):
         """
         특정 종목의 일별 지표 계산
-        (KeyError 방지를 위해 ticker, Close, Volume 컬럼을 모두 포함하여 반환)
+        (yfinance API 변경 대응)
         """
         import yfinance as yf
         import pandas as pd
@@ -139,15 +139,21 @@ class DailyStockFactorModel:
             start_date = min(daily_dates) - relativedelta(months=15)
             end_date = max(daily_dates) + relativedelta(days=5)
 
-            # 가격 데이터 (종목)
+            # 🔥 수정: auto_adjust=True, multi_level_index 제거
             hist_data = yf.download(
                 symbol,
                 start=start_date,
                 end=end_date,
                 progress=False,
-                auto_adjust=False,
-                multi_level_index=False,
             )
+
+            # 🔥 MultiIndex 처리
+            if isinstance(hist_data.columns, pd.MultiIndex):
+                hist_data.columns = hist_data.columns.droplevel(1)
+
+            # 🔥 컬럼명 표준화
+            if "Adj Close" not in hist_data.columns and "Close" in hist_data.columns:
+                hist_data["Adj Close"] = hist_data["Close"]
 
             if len(hist_data) < 30:
                 print(f"{symbol}: 데이터가 충분하지 않습니다 (행 수: {len(hist_data)})")
@@ -159,9 +165,15 @@ class DailyStockFactorModel:
                 start=start_date,
                 end=end_date,
                 progress=False,
-                auto_adjust=False,
-                multi_level_index=False,
             )
+
+            # 🔥 MultiIndex 처리
+            if isinstance(index_data.columns, pd.MultiIndex):
+                index_data.columns = index_data.columns.droplevel(1)
+
+            # 🔥 컬럼명 표준화
+            if "Adj Close" not in index_data.columns and "Close" in index_data.columns:
+                index_data["Adj Close"] = index_data["Close"]
 
             # -----------------------
             # 2. 재무 정보 (섹터/산업, PBR)
@@ -260,7 +272,7 @@ class DailyStockFactorModel:
             calendar = pd.to_datetime(daily_dates)
             calendar_df = pd.DataFrame(index=calendar)
 
-            # [중요] 다음 단계 계산을 위해 'Adj Close', 'Volume'도 꼭 포함해야 함
+            # [중요] 다음 단계 계산을 위해 'Adj Close', 'Volume'도 꼭 포함
             feature_cols = [
                 "Beta",
                 "MarketCap",
@@ -274,7 +286,7 @@ class DailyStockFactorModel:
                 "Signal",
                 "MACD_Hist",
                 "Adj Close",
-                "Volume",  # <--- 여기에 추가됨!
+                "Volume",
             ]
 
             # 캘린더에 맞춰 재정렬 (ffill)
@@ -284,13 +296,17 @@ class DailyStockFactorModel:
             for dt, row in feat.iterrows():
                 results.append(
                     {
-                        "Symbol": symbol,  # 대문자 (remove_duplicates용)
-                        "ticker": symbol,  # 소문자 (calculate_factor_scores용) <--- 해결의 핵심
+                        "Symbol": symbol,
+                        "ticker": symbol,
                         "Name": name,
                         "Date": dt.strftime("%Y-%m-%d"),
-                        # 팩터 계산에 필요한 원본 데이터 전달
-                        "Close": row["Adj Close"],
-                        "Volume": row["Volume"],
+                        # 🔥 Close 추가 (모델 입력용)
+                        "Close": round(row["Adj Close"], 2)
+                        if not pd.isna(row["Adj Close"])
+                        else 0.0,
+                        "Volume": int(row["Volume"])
+                        if not pd.isna(row["Volume"])
+                        else 0,
                         "Beta": round(row["Beta"], 2)
                         if not pd.isna(row["Beta"])
                         else 1.0,
@@ -518,6 +534,8 @@ class DailyStockFactorModel:
             "Symbol",
             "Name",
             "Date",
+            "Close",  # 🔥 추가
+            "Volume",
             "Beta",
             "PBR",
             "MarketCap",

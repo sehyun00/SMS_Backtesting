@@ -279,66 +279,111 @@ class HybridPortfolioEnv:
         return state.astype(np.float32)
 
     def step(self, action):
-        """
-        개선된 보상 함수:
-        1. 수익률 (기본)
-        2. 하방 위험 페널티 (Sortino 개선)
-        3. 포트폴리오 집중도 페널티 (과집중 방지)
-        """
         w = self.windows[self.current_step]
         returns = w["labels"]
 
-        # 포트폴리오 수익률 계산
         portfolio_return_pct = np.dot(action, returns)
         portfolio_return = portfolio_return_pct / 100.0
 
-        # 거래 비용
         turnover = np.sum(np.abs(action - self.prev_weights))
         cost = turnover * self.cost_bps
-
-        # 순수익률
         net_return = portfolio_return - cost
-        self.portfolio_value *= 1 + net_return
 
+        self.portfolio_value *= 1 + net_return
         self.current_step += 1
         done = self.current_step >= self.n_steps
 
-        # ============ 개선된 보상 함수 ============
         self.return_history.append(net_return)
 
-        if len(self.return_history) >= 6:  # 최소 6개월 히스토리 필요
-            returns_array = np.array(self.return_history[-12:])  # 최근 12개월만 사용
-
-            # 1. 수익률 성분
+        if len(self.return_history) >= 6:
+            returns_array = np.array(self.return_history[-12:])
             mean_return = np.mean(returns_array)
 
-            # 2. 하방 위험 (Downside Deviation)
             negative_returns = returns_array[returns_array < 0]
             downside_std = (
                 np.std(negative_returns) if len(negative_returns) > 0 else 0.0
             )
 
-            # 3. 포트폴리오 집중도 (Herfindahl Index)
-            # 0.1 = 완전 분산 (1/10), 1.0 = 완전 집중
-            concentration = np.sum(action**2)
-
-            # 4. 변동성
+            concentration = np.sum(action**2)  # HHI
             volatility = np.std(returns_array)
 
-            # 🔥 포트폴리오 다양성 보너스 추가
-            entropy = -np.sum(action * np.log(action + 1e-10))
-            diversity_bonus = 5.0 * entropy  # 엔트로피 높을수록 보상
+            # ============ 🔥 정교한 보상 함수 설계 ============
 
+            # 1. 수익률 성분 (기본)
+            return_reward = mean_return * 100
+
+            # 2. 위험 조정 (Sharpe-like)
+            risk_adjusted_return = mean_return / (volatility + 1e-8)
+            sharpe_bonus = risk_adjusted_return * 30.0
+
+            # 3. 하방 위험 (Sortino-like)
+            downside_penalty = 50.0 * downside_std
+
+            # 4. MDD 페널티 (핵심!)
+            if len(self.return_history) >= 12:
+                cumulative_returns = np.cumprod(1 + np.array(self.return_history[-12:]))
+                peak = np.maximum.accumulate(cumulative_returns)
+                drawdowns = (cumulative_returns - peak) / peak
+                current_mdd = abs(min(drawdowns))
+
+                # MDD에 따른 비선형 페널티
+                if current_mdd > 0.30:  # 30% 초과: 극강 페널티
+                    mdd_penalty = 800.0 * (current_mdd - 0.30) ** 2
+                elif current_mdd > 0.25:  # 25-30%: 강한 페널티
+                    mdd_penalty = 400.0 * (current_mdd - 0.25) ** 2
+                elif current_mdd > 0.20:  # 20-25%: 보통 페널티
+                    mdd_penalty = 150.0 * (current_mdd - 0.20) ** 2
+                else:  # 20% 이하: 페널티 없음
+                    mdd_penalty = 0
+            else:
+                mdd_penalty = 0
+
+            # 5. 변동성 페널티 (부드러운 곡선)
+            # 월간 변동성 4% 이하 목표
+            if volatility > 0.06:  # 6% 초과: 강한 페널티
+                volatility_penalty = 100.0 * (volatility - 0.06) ** 2
+            elif volatility > 0.04:  # 4-6%: 약한 페널티
+                volatility_penalty = 30.0 * (volatility - 0.04) ** 2
+            else:  # 4% 이하: 페널티 없음
+                volatility_penalty = 0
+
+            # 6. 집중도 페널티 (부드러운 곡선)
+            # HHI 0.20 이하 목표 (5종목 균등 = 0.20)
+            if concentration > 0.30:  # 극심한 집중
+                concentration_penalty = 200.0 * (concentration - 0.30) ** 2
+            elif concentration > 0.25:  # 높은 집중
+                concentration_penalty = 100.0 * (concentration - 0.25) ** 2
+            elif concentration > 0.20:  # 약간 집중
+                concentration_penalty = 40.0 * (concentration - 0.20) ** 2
+            else:  # 적절한 분산
+                concentration_penalty = 0
+
+            # 7. 다양성 보너스 (엔트로피 기반)
+            entropy = -np.sum(action * np.log(action + 1e-10))
+            max_entropy = np.log(len(action))
+            normalized_entropy = entropy / max_entropy
+
+            # 엔트로피가 높을수록 보너스
+            if normalized_entropy > 0.85:  # 매우 균등 (8-9종목)
+                diversity_bonus = 60.0 * normalized_entropy
+            elif normalized_entropy > 0.75:  # 적당히 균등 (6-7종목)
+                diversity_bonus = 40.0 * normalized_entropy
+            else:  # 집중 (4-5종목)
+                diversity_bonus = 20.0 * normalized_entropy
+
+            # ============ 🔥 최종 보상 함수 ============
             reward = (
-                mean_return * 100  # 수익률 (기본 보상)
-                - 30.0 * downside_std  # 하방 위험 페널티 (50 → 30 완화)
-                - 15.0 * max(0, concentration - 0.20)  # 집중도 페널티 (완화)
-                - 8.0 * max(0, volatility - 0.06)  # 변동성 페널티 (완화)
-                + diversity_bonus  # 🔥 다양성 보너스 추가
+                return_reward  # 수익률 (기본)
+                + sharpe_bonus  # 위험 조정 수익
+                - downside_penalty  # 하방 위험
+                - mdd_penalty  # MDD (핵심!)
+                - volatility_penalty  # 변동성
+                - concentration_penalty  # 집중도
+                + diversity_bonus  # 다양성
             )
 
         else:
-            # 초기 몇 스텝: 단순 수익률 사용
+            # 초기 몇 스텝: 단순 보상
             reward = net_return * 100
 
         self.prev_weights = action
@@ -353,7 +398,7 @@ class HybridPortfolioEnv:
             "date": w["date"],
             "turnover": turnover,
             "cost": cost,
-            "concentration": np.sum(action**2),  # 모니터링용
+            "concentration": np.sum(action**2),
             "downside_risk": downside_std if len(self.return_history) >= 6 else 0,
         }
 
@@ -549,17 +594,22 @@ def run_fixed_weights(dataset, strategy_name="1/N Buy & Hold"):
 def main(mode="compare"):
     df = pd.read_csv(DATA_PATH)
     feature_cols = [
+        # 🔥 원본 지표 (동적으로 변함)
+        "Close",  # 주가
+        "Volume",  # 거래량
         "Beta",
         "MarketCap",
+        # 🔥 모멘텀 (변화율)
         "Momentum1M",
+        "Momentum3M",
         "Momentum6M",
+        "Momentum12M",
+        # 🔥 기술적 지표 (동적)
         "Volatility",
         "RSI",
-        "Beta_Factor",
-        "Value_Factor",
-        "Size_Factor",
-        "Momentum_Factor",
-        "Volatility_Factor",
+        "MACD",
+        "Signal",
+        "MACD_Hist",
     ]
 
     print("\n[초기화] Hybrid 데이터셋 준비 중...")
@@ -587,7 +637,7 @@ def main(mode="compare"):
         train_env = HybridPortfolioEnv(dataset, windows=train_windows)
 
         # 실제 학습
-        train_hybrid(agent, train_env, num_episodes=30)
+        train_hybrid(agent, train_env, num_episodes=100)
 
         # Actor 모델 저장
         torch.save(agent.actor.state_dict(), model_path)

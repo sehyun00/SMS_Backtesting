@@ -114,12 +114,7 @@ class TGNNEncoder(nn.Module):
 
 
 class HybridActor(nn.Module):
-    """
-    개선된 Hybrid Actor 네트워크 (듀얼 경로 구조)
-    - TGNN 경로: 그래프 기반 안정적 포트폴리오 제안
-    - DDPG 경로: 수익 극대화 포트폴리오 제안
-    - 동적 앙상블: 시장 상황에 따라 두 경로의 가중치 자동 조정
-    """
+    """순수 학습 기반: 하드 제약 최소화, Soft Constraint로 제어"""
 
     def __init__(self, num_stocks, window_size, num_features, hidden_dim=128):
         super().__init__()
@@ -127,7 +122,7 @@ class HybridActor(nn.Module):
         self.window_size = window_size
         self.num_features = num_features
 
-        # ============ TGNN 경로 (안정성 중심) ============
+        # TGNN 경로
         self.tgnn_encoder = TGNNEncoder(num_features)
         tgnn_input_dim = num_stocks * self.tgnn_encoder.out_dim
 
@@ -135,15 +130,14 @@ class HybridActor(nn.Module):
             nn.Linear(tgnn_input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.1),  # 과적합 방지
+            nn.Dropout(0.1),
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.LayerNorm(hidden_dim // 2),
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, num_stocks),
         )
 
-        # ============ DDPG 경로 (수익성 중심) ============
-        # Flatten된 전체 상태를 직접 사용
+        # DDPG 경로
         state_dim = num_stocks * window_size * num_features + num_stocks * num_stocks
 
         self.ddpg_encoder = nn.Sequential(
@@ -162,8 +156,7 @@ class HybridActor(nn.Module):
             nn.Linear(hidden_dim // 2, num_stocks),
         )
 
-        # ============ 앙상블 가중치 학습 네트워크 ============
-        # 입력: 전체 상태 + TGNN 제안 + DDPG 제안
+        # 앙상블 가중치
         ensemble_input_dim = state_dim + num_stocks * 2
 
         self.ensemble_weight_net = nn.Sequential(
@@ -172,21 +165,13 @@ class HybridActor(nn.Module):
             nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, 1),
-            nn.Sigmoid(),  # 0~1 사이 값 출력 (TGNN 비중)
+            nn.Sigmoid(),
         )
 
     def forward(self, state):
-        """
-        Returns:
-            final_weights: 최종 포트폴리오 비중 (합=1)
-            alpha: TGNN 비중 (모니터링용)
-            tgnn_weights: TGNN 경로 출력 (분석용)
-            ddpg_weights: DDPG 경로 출력 (분석용)
-        """
         batch = state.shape[0]
         feat_size = self.num_stocks * self.window_size * self.num_features
 
-        # 상태 벡터 복원
         features_flat = state[:, :feat_size]
         adj_flat = state[:, feat_size:]
 
@@ -195,27 +180,35 @@ class HybridActor(nn.Module):
         )
         adj = adj_flat.reshape(batch, self.num_stocks, self.num_stocks)
 
-        # ============ TGNN 경로 실행 ============
-        tgnn_embeddings = self.tgnn_encoder(features, adj)  # (Batch, N, D)
+        # ============ 🔥 순수 학습: 하드 제약 제거 ============
+        temperature = 2.5  # 적당한 균형
+
+        # TGNN 경로
+        tgnn_embeddings = self.tgnn_encoder(features, adj)
         tgnn_embeddings_flat = tgnn_embeddings.reshape(batch, -1)
         tgnn_logits = self.tgnn_head(tgnn_embeddings_flat)
-        tgnn_weights = F.softmax(tgnn_logits, dim=-1)
+        tgnn_weights = F.softmax(tgnn_logits / temperature, dim=-1)
 
-        # ============ DDPG 경로 실행 ============
+        # DDPG 경로
         ddpg_features = self.ddpg_encoder(state)
         ddpg_logits = self.ddpg_head(ddpg_features)
-        ddpg_weights = F.softmax(ddpg_logits, dim=-1)
+        ddpg_weights = F.softmax(ddpg_logits / temperature, dim=-1)
 
-        # ============ 동적 앙상블 가중치 계산 ============
+        # 앙상블
         ensemble_input = torch.cat([state, tgnn_weights, ddpg_weights], dim=-1)
-        alpha_raw = self.ensemble_weight_net(ensemble_input)  # (Batch, 1)
-
-        # ⭐ 추가: Alpha를 0.3~0.7 범위로 제한 (균형 유지)
+        alpha_raw = self.ensemble_weight_net(ensemble_input)
         alpha = 0.3 + 0.4 * torch.sigmoid(alpha_raw)
 
-        # ============ 최종 포트폴리오 결합 ============
-        # α * TGNN + (1-α) * DDPG
+        # 최종 결합
         final_weights = alpha * tgnn_weights + (1 - alpha) * ddpg_weights
+
+        # ============ 🔥 최소한의 안전장치만 (극단적 경우) ============
+        # 극단적 집중 방지: 95% 이상 집중 방지
+        MAX_EXTREME = 0.95
+        final_weights = torch.clamp(final_weights, 0, MAX_EXTREME)
+
+        # 정규화
+        final_weights = final_weights / (final_weights.sum(dim=-1, keepdim=True) + 1e-8)
 
         return final_weights, alpha.squeeze(-1), tgnn_weights, ddpg_weights
 
