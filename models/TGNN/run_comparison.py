@@ -183,15 +183,15 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
     ax4 = fig.add_subplot(gs[1, 2])
 
     strategies = {
-        "1/N 매수 후 보유": buy_and_hold,
-        "TGNN (월간)": monthly,
-        "TGNN (분기)": quarterly,
-        "TGNN (반기)": semiannual,
-        "TGNN (연간)": annual,
+        "1/N Buy & Hold": buy_and_hold,
+        "TGNN (Monthly)": monthly,
+        "TGNN (Quarterly)": quarterly,
+        "TGNN (Semiannual)": semiannual,
+        "TGNN (Annual)": annual,
     }
 
     colors = ["#2E86AB", "#A23B72", "#F18F01", "#C73E1D", "#6A994E"]
-    labels = ["B&H", "월간", "분기", "반기", "연간"]
+    labels = ["B&H", "Monthly", "Quarterly", "Semiannual", "Annual"]
 
     # ==========================================
     # 1. 누적 수익률 그래프
@@ -206,13 +206,13 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
         ax1.plot(dates, returns, label=name, linewidth=2.5, color=color)
 
     ax1.set_title(
-        "리밸런싱 빈도별 누적 수익률 (2018-2025)",
+        "Rebalancing Frequency Comparison (2018-2025)",
         fontsize=16,
         fontweight="bold",
         pad=15,
     )
-    ax1.set_ylabel("누적 수익률 (%)", fontsize=12, fontweight="bold")
-    ax1.set_xlabel("연도", fontsize=12, fontweight="bold")
+    ax1.set_ylabel("Cumulative Return (%)", fontsize=12, fontweight="bold")
+    ax1.set_xlabel("Year", fontsize=12, fontweight="bold")
 
     ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     ax1.xaxis.set_major_locator(mdates.YearLocator())
@@ -239,8 +239,8 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
     bars = ax2.bar(range(5), cagr_values, color=colors, alpha=0.85, edgecolor="black", width=0.7)
     ax2.set_xticks(range(5))
     ax2.set_xticklabels(labels, fontsize=11, fontweight="bold")
-    ax2.set_title("연평균 수익률 (CAGR)", fontsize=13, fontweight="bold", pad=10)
-    ax2.set_ylabel("수익률 (%)", fontsize=11)
+    ax2.set_title("CAGR", fontsize=13, fontweight="bold", pad=10)
+    ax2.set_ylabel("Return (%)", fontsize=11)
     ax2.grid(axis="y", alpha=0.3)
     ax2.set_ylim(0, max(cagr_values) * 1.2)
 
@@ -265,8 +265,8 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
     bars = ax3.bar(range(5), mdd_values, color=colors, alpha=0.85, edgecolor="black", width=0.7)
     ax3.set_xticks(range(5))
     ax3.set_xticklabels(labels, fontsize=11, fontweight="bold")
-    ax3.set_title("최대 낙폭 (MDD)", fontsize=13, fontweight="bold", pad=10)
-    ax3.set_ylabel("낙폭 (%)", fontsize=11)
+    ax3.set_title("Maximum Drawdown (MDD)", fontsize=13, fontweight="bold", pad=10)
+    ax3.set_ylabel("Drawdown (%)", fontsize=11)
     ax3.grid(axis="y", alpha=0.3)
     ax3.set_ylim(0, max(mdd_values) * 1.2)
 
@@ -289,8 +289,8 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
     bars = ax4.bar(range(5), avg_dd_values, color=colors, alpha=0.85, edgecolor="black", width=0.7)
     ax4.set_xticks(range(5))
     ax4.set_xticklabels(labels, fontsize=11, fontweight="bold")
-    ax4.set_title("연평균 낙폭 (Avg DD)", fontsize=13, fontweight="bold", pad=10)
-    ax4.set_ylabel("낙폭 (%)", fontsize=11)
+    ax4.set_title("Average Annual Drawdown (Avg DD)", fontsize=13, fontweight="bold", pad=10)
+    ax4.set_ylabel("Drawdown (%)", fontsize=11)
     ax4.grid(axis="y", alpha=0.3)
     ax4.set_ylim(0, max(avg_dd_values) * 1.2)
 
@@ -446,16 +446,16 @@ def main(mode="compare"):
             "TGNN (연간)",
         ]
 
-        # CAGR 계산
+        # CAGR 계산(연평균 수익률)
         cagr_list = []
-        for data in strategies_data:
+        for data in strategies_data:    
             dates_list = pd.to_datetime(data["dates"])
             days = (dates_list.max() - dates_list.min()).days
             years = days / 365.25
             cagr = (pow(data["final_capital"] / 1000000, 1 / years) - 1) * 100
             cagr_list.append(f"{cagr:.2f}%")
 
-        # MDD 계산
+        # MDD 계산(월별 낙폭)
         mdd_list = []
         for data in strategies_data:
             portfolio = np.array(data["portfolio_values"])
