@@ -305,8 +305,8 @@ class HybridPortfolioEnv:
 
             # ============ 🔥 Sophisticated Reward Function Design ============
 
-            # 1. Return component (basic)
-            return_reward = mean_return * 100
+            # 1. Return component (REDUCED from 100 to 50)
+            return_reward = mean_return * 50  # 🔥 Changed: 100 → 50
 
             # 2. Risk adjustment (Sharpe-like)
             risk_adjusted_return = mean_return / (volatility + 1e-8)
@@ -343,12 +343,12 @@ class HybridPortfolioEnv:
             else:  # Below 4%: no penalty
                 volatility_penalty = 0
 
-            # ============ 🔥 Modified: MUCH STRONGER concentration penalty ============
-            # Target: HHI below 0.15 (approximately 6-7 stocks)
-            # Changed from gradual penalties to immediate strong cubic penalty
-            if concentration > 0.15:
-                # Cubic penalty for severe punishment of concentration
-                concentration_penalty = 1000.0 * (concentration - 0.15) ** 3
+            # ============ 🔥 Modified: EXTREME concentration penalty ============
+            # Target: HHI below 0.12 (approximately 8-9 stocks)
+            # Changed: threshold 0.15 → 0.12, penalty 1000x³ → 5000x⁴
+            if concentration > 0.12:
+                # Quartic penalty (4th power) for EXTREME punishment
+                concentration_penalty = 5000.0 * (concentration - 0.12) ** 4
             else:
                 concentration_penalty = 0
 
@@ -367,12 +367,12 @@ class HybridPortfolioEnv:
 
             # ============ 🔥 Final Reward Function ============
             reward = (
-                return_reward  # Return (basic)
+                return_reward  # Return (REDUCED! 50 instead of 100)
                 + sharpe_bonus  # Risk-adjusted return
                 - downside_penalty  # Downside risk
                 - mdd_penalty  # MDD (Core!)
                 - volatility_penalty  # Volatility
-                - concentration_penalty  # Concentration (STRENGTHENED!)
+                - concentration_penalty  # Concentration (EXTREME PENALTY!)
                 + diversity_bonus  # Diversity
             )
 
