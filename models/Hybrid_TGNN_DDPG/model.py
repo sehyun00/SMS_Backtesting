@@ -6,14 +6,14 @@ from collections import deque
 import random
 
 
-# ==================== 1. TGNN 로직 (상태 인코더) ====================
+# ==================== 1. TGNN Logic (State Encoder) ====================
 
 
 class GraphConvLayer(nn.Module):
     """
-    그래프 합성곱 레이어 (Graph Convolutional Layer)
-    - 인접 행렬(Adjacency Matrix)을 사용하여 이웃 노드의 정보를 집계합니다.
-    - 수식: Output = Activation(Normalized_Adj * X * W)
+    Graph Convolutional Layer
+    - Aggregates information from neighboring nodes using the Adjacency Matrix.
+    - Formula: Output = Activation(Normalized_Adj * X * W)
     """
 
     def __init__(self, in_features: int, out_features: int):
@@ -21,18 +21,18 @@ class GraphConvLayer(nn.Module):
         self.linear = nn.Linear(in_features, out_features)
 
     def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
-        # x: (Batch, N, In_F) - 노드 특징 행렬
-        # adj: (Batch, N, N) - 인접 행렬
+        # x: (Batch, N, In_F) - Node feature matrix
+        # adj: (Batch, N, N) - Adjacency matrix
 
-        # 차수 행렬(Degree Matrix) 계산 및 정규화 준비
+        # Calculate Degree Matrix and prepare normalization
         D = torch.sum(adj, dim=-1)
         D_inv_sqrt = torch.pow(D + 1e-6, -0.5)
         D_inv_sqrt[torch.isinf(D_inv_sqrt)] = 0.0
 
-        # 인접 행렬 정규화: D^(-1/2) * A * D^(-1/2)
+        # Normalize adjacency matrix: D^(-1/2) * A * D^(-1/2)
         norm_adj = D_inv_sqrt.unsqueeze(-1) * adj * D_inv_sqrt.unsqueeze(-2)
 
-        # 선형 변환 및 정보 전파
+        # Linear transformation and information propagation
         support = self.linear(x)
         output = torch.matmul(norm_adj, support)
         return F.relu(output)
@@ -40,9 +40,9 @@ class GraphConvLayer(nn.Module):
 
 class TemporalAttention(nn.Module):
     """
-    시간적 주의 메커니즘 (Temporal Attention)
-    - 시계열 데이터에서 중요한 시간 시점에 가중치를 부여합니다.
-    - Multi-head Attention을 사용하여 시간 축(Time axis)에 대한 중요도를 학습합니다.
+    Temporal Attention Mechanism
+    - Assigns weights to important time steps in time series data.
+    - Uses Multi-head Attention to learn importance along the time axis.
     """
 
     def __init__(self, hidden_dim: int, num_heads: int = 4):
@@ -53,30 +53,30 @@ class TemporalAttention(nn.Module):
         # x: (Batch, T, N, D)
         batch, T, N, D = x.shape
 
-        # 각 노드별로 시간 축에 대해 Attention 적용을 위해 차원 변경
-        # (Batch * N, T, D) 형태로 변환
+        # Reshape for applying Attention along time axis for each node
+        # Convert to (Batch * N, T, D) format
         x_reshaped = x.permute(0, 2, 1, 3).reshape(batch * N, T, D)
 
-        # Self-Attention 수행
+        # Perform Self-Attention
         attn_out, _ = self.attention(x_reshaped, x_reshaped, x_reshaped)
 
-        # 마지막 시점의 attended feature만 추출하여 원래 배치 구조로 복원
+        # Extract attended feature of the last time step and restore to original batch structure
         # (Batch, N, D)
         return attn_out[:, -1, :].reshape(batch, N, D)
 
 
 class TGNNEncoder(nn.Module):
     """
-    시공간 인코더 (Spatiotemporal Encoder)
-    - TGNN 구조를 활용하여 주가 데이터의 공간적(종목 간 관계) 및 시간적(시계열) 특징을 추출합니다.
-    - 구조: GCN Layers (공간 정보) -> Temporal Attention (시간 정보)
+    Spatiotemporal Encoder
+    - Uses TGNN structure to extract spatial (inter-stock relationships) and temporal (time series) features.
+    - Structure: GCN Layers (spatial info) -> Temporal Attention (temporal info)
     """
 
     def __init__(self, num_features, hidden_dims=[64, 64], num_heads=4):
         super().__init__()
         self.input_proj = nn.Linear(num_features, hidden_dims[0])
 
-        # 여러 층의 GCN 쌓기
+        # Stack multiple GCN layers
         self.gcn_layers = nn.ModuleList(
             [
                 GraphConvLayer(hidden_dims[i], hidden_dims[i + 1])
@@ -88,11 +88,11 @@ class TGNNEncoder(nn.Module):
         self.out_dim = hidden_dims[-1]
 
     def forward(self, features, adj):
-        # features: (Batch, N, T, F) - 배치, 종목수, 시간(윈도우), 특징수
+        # features: (Batch, N, T, F) - Batch, num_stocks, time (window), num_features
         batch, N, T, F = features.shape
 
         gcn_outputs = []
-        # 각 시간 단계(t)별로 GCN 적용
+        # Apply GCN for each time step (t)
         for t in range(T):
             x_t = features[:, :, t, :]  # (Batch, N, F)
             h = self.input_proj(x_t)
@@ -102,19 +102,19 @@ class TGNNEncoder(nn.Module):
 
             gcn_outputs.append(h)
 
-        # 시간 축으로 결과 쌓기: (Batch, T, N, D)
+        # Stack results along time axis: (Batch, T, N, D)
         temporal_features = torch.stack(gcn_outputs, dim=1)
 
-        # 시간적 주의 메커니즘 적용하여 최종 임베딩 생성 -> (Batch, N, D)
+        # Apply temporal attention mechanism to generate final embedding -> (Batch, N, D)
         node_embeddings = self.temporal_attn(temporal_features)
         return node_embeddings
 
 
-# ==================== 2. Hybrid 네트워크 컴포넌트 (Actor-Critic) ====================
+# ==================== 2. Hybrid Network Components (Actor-Critic) ====================
 
 
 class HybridActor(nn.Module):
-    """순수 학습 기반: 하드 제약 최소화, Soft Constraint로 제어"""
+    """Pure learning-based: minimize hard constraints, control with soft constraints"""
 
     def __init__(self, num_stocks, window_size, num_features, hidden_dim=128):
         super().__init__()
@@ -122,7 +122,7 @@ class HybridActor(nn.Module):
         self.window_size = window_size
         self.num_features = num_features
 
-        # TGNN 경로
+        # TGNN path
         self.tgnn_encoder = TGNNEncoder(num_features)
         tgnn_input_dim = num_stocks * self.tgnn_encoder.out_dim
 
@@ -137,7 +137,7 @@ class HybridActor(nn.Module):
             nn.Linear(hidden_dim // 2, num_stocks),
         )
 
-        # DDPG 경로
+        # DDPG path
         state_dim = num_stocks * window_size * num_features + num_stocks * num_stocks
 
         self.ddpg_encoder = nn.Sequential(
@@ -156,7 +156,7 @@ class HybridActor(nn.Module):
             nn.Linear(hidden_dim // 2, num_stocks),
         )
 
-        # 앙상블 가중치
+        # Ensemble weight
         ensemble_input_dim = state_dim + num_stocks * 2
 
         self.ensemble_weight_net = nn.Sequential(
@@ -180,34 +180,36 @@ class HybridActor(nn.Module):
         )
         adj = adj_flat.reshape(batch, self.num_stocks, self.num_stocks)
 
-        # ============ 🔥 순수 학습: 하드 제약 제거 ============
-        temperature = 2.5  # 적당한 균형
+        # ============ 🔥 Modified: Increase temperature for more uniform distribution ============
+        temperature = 5.0  # Changed from 2.5 to 5.0 for better diversification
 
-        # TGNN 경로
+        # TGNN path
         tgnn_embeddings = self.tgnn_encoder(features, adj)
         tgnn_embeddings_flat = tgnn_embeddings.reshape(batch, -1)
         tgnn_logits = self.tgnn_head(tgnn_embeddings_flat)
         tgnn_weights = F.softmax(tgnn_logits / temperature, dim=-1)
 
-        # DDPG 경로
+        # DDPG path
         ddpg_features = self.ddpg_encoder(state)
         ddpg_logits = self.ddpg_head(ddpg_features)
         ddpg_weights = F.softmax(ddpg_logits / temperature, dim=-1)
 
-        # 앙상블
+        # Ensemble
         ensemble_input = torch.cat([state, tgnn_weights, ddpg_weights], dim=-1)
         alpha_raw = self.ensemble_weight_net(ensemble_input)
         alpha = 0.3 + 0.4 * torch.sigmoid(alpha_raw)
 
-        # 최종 결합
+        # Final combination
         final_weights = alpha * tgnn_weights + (1 - alpha) * ddpg_weights
 
-        # ============ 🔥 최소한의 안전장치만 (극단적 경우) ============
-        # 극단적 집중 방지: 95% 이상 집중 방지
-        MAX_EXTREME = 0.95
-        final_weights = torch.clamp(final_weights, 0, MAX_EXTREME)
+        # ============ 🔥 Modified: Stronger diversification constraints ============
+        # Prevent extreme concentration
+        MAX_WEIGHT = 0.30  # Changed from 0.95 to 0.30 (max 30% per stock)
+        MIN_WEIGHT = 0.03  # Added: min 3% per stock (forced diversification)
+        
+        final_weights = torch.clamp(final_weights, MIN_WEIGHT, MAX_WEIGHT)
 
-        # 정규화
+        # Normalize
         final_weights = final_weights / (final_weights.sum(dim=-1, keepdim=True) + 1e-8)
 
         return final_weights, alpha.squeeze(-1), tgnn_weights, ddpg_weights
@@ -215,8 +217,8 @@ class HybridActor(nn.Module):
 
 class HybridCritic(nn.Module):
     """
-    개선된 Hybrid Critic 네트워크
-    - Actor의 듀얼 경로 구조에 맞춰 Q-Value 평가
+    Improved Hybrid Critic Network
+    - Evaluates Q-Value aligned with Actor's dual-path structure
     """
 
     def __init__(
@@ -227,17 +229,17 @@ class HybridCritic(nn.Module):
         self.window_size = window_size
         self.num_features = num_features
 
-        # TGNN 특징 추출기
+        # TGNN feature extractor
         self.tgnn_encoder = TGNNEncoder(num_features)
 
-        # DDPG 특징 추출기
+        # DDPG feature extractor
         state_dim = num_stocks * window_size * num_features + num_stocks * num_stocks
         self.ddpg_encoder = nn.Sequential(
             nn.Linear(state_dim, 256), nn.ReLU(), nn.Linear(256, hidden_dim)
         )
 
-        # Q-Value 예측 헤드
-        # 입력: TGNN 임베딩 + DDPG 임베딩 + Action
+        # Q-Value prediction head
+        # Input: TGNN embedding + DDPG embedding + Action
         tgnn_emb_dim = num_stocks * self.tgnn_encoder.out_dim
         input_dim = tgnn_emb_dim + hidden_dim + action_dim
 
@@ -256,7 +258,7 @@ class HybridCritic(nn.Module):
         batch = state.shape[0]
         feat_size = self.num_stocks * self.window_size * self.num_features
 
-        # 상태 복원
+        # Restore state
         features_flat = state[:, :feat_size]
         adj_flat = state[:, feat_size:]
 
@@ -265,37 +267,37 @@ class HybridCritic(nn.Module):
         )
         adj = adj_flat.reshape(batch, self.num_stocks, self.num_stocks)
 
-        # 두 경로의 특징 추출
+        # Extract features from both paths
         tgnn_embeddings = self.tgnn_encoder(features, adj)
         tgnn_embeddings_flat = tgnn_embeddings.reshape(batch, -1)
 
         ddpg_embeddings = self.ddpg_encoder(state)
 
-        # Q-Value 계산 (두 경로 특징 + 행동 결합)
+        # Calculate Q-Value (combine features from both paths + action)
         qa = torch.cat([tgnn_embeddings_flat, ddpg_embeddings, action], dim=-1)
         q_value = self.q_net(qa)
 
         return q_value
 
 
-# ==================== 3. RL 인프라 (Replay Buffer & Agent) ====================
+# ==================== 3. RL Infrastructure (Replay Buffer & Agent) ====================
 
 
 class ReplayBuffer:
     """
-    경험 재생 버퍼 (Experience Replay Buffer)
-    - 학습 데이터를 저장하고 무작위로 샘플링하여 데이터 간 상관관계를 끊고 학습 안정성을 높입니다.
+    Experience Replay Buffer
+    - Stores training data and samples randomly to break correlations between data and improve training stability.
     """
 
     def __init__(self, capacity=10000):
         self.buffer = deque(maxlen=capacity)
 
     def push(self, state, action, reward, next_state, done):
-        """새로운 경험 저장"""
+        """Store new experience"""
         self.buffer.append((state, action, reward, next_state, done))
 
     def sample(self, batch_size):
-        """학습을 위한 미니배치 샘플링"""
+        """Sample mini-batch for training"""
         batch = random.sample(self.buffer, batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)
         return (
@@ -312,9 +314,9 @@ class ReplayBuffer:
 
 class HybridAgent:
     """
-    Hybrid DDPG 에이전트
-    - Actor와 Critic 네트워크를 관리하고 학습시킵니다.
-    - Target Network를 사용하여 학습 안정성을 확보합니다.
+    Hybrid DDPG Agent
+    - Manages and trains Actor and Critic networks.
+    - Uses Target Network to ensure training stability.
     """
 
     def __init__(
@@ -334,13 +336,13 @@ class HybridAgent:
         self.tau = tau
         self.entropy_coef = entropy_coef
 
-        # 네트워크 초기화
+        # Initialize networks
         self.actor = HybridActor(num_stocks, window_size, num_features).to(device)
         self.critic = HybridCritic(
             num_stocks, window_size, num_features, num_stocks
         ).to(device)
 
-        # 타겟 네트워크 초기화 (학습 대상 네트워크 복사)
+        # Initialize target networks (copy training networks)
         self.actor_target = HybridActor(num_stocks, window_size, num_features).to(
             device
         )
@@ -350,14 +352,14 @@ class HybridAgent:
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.critic_target.load_state_dict(self.critic.state_dict())
 
-        # 옵티마이저 설정
+        # Set up optimizers
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=lr_actor)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr_critic)
 
         self.replay_buffer = ReplayBuffer()
 
     def select_action(self, state, noise_std=0.1):
-        """개선: alpha 값도 함께 반환"""
+        """Improved: also return alpha value"""
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
             final_weights, alpha, tgnn_weights, ddpg_weights = self.actor(state)
@@ -365,17 +367,17 @@ class HybridAgent:
             alpha_value = alpha.cpu().item()
 
         if noise_std > 0:
-            # 탐색 노이즈 추가
+            # Add exploration noise
             noise = np.random.normal(0, noise_std, size=action.shape)
             action = action + noise
             action = np.clip(action, 0, 1)
             action = action / (action.sum() + 1e-8)
 
-        # 디버깅용 정보 반환 (필요시)
-        return action, alpha_value  # alpha 값도 반환
+        # Return debugging information (if needed)
+        return action, alpha_value  # also return alpha value
 
     def train(self, batch_size=64):
-        """학습 메서드 - 엔트로피 정규화 추가"""
+        """Training method - with entropy regularization"""
         if len(self.replay_buffer) < batch_size:
             return
 
@@ -389,7 +391,7 @@ class HybridAgent:
         dones = torch.FloatTensor(dones).to(self.device)
 
         # ----------------------------
-        # 1. Critic 네트워크 업데이트
+        # 1. Update Critic Network
         # ----------------------------
         with torch.no_grad():
             next_actions, _, _, _ = self.actor_target(next_states)
@@ -406,20 +408,20 @@ class HybridAgent:
         self.critic_optimizer.step()
 
         # ----------------------------
-        # 2. Actor 네트워크 업데이트 (엔트로피 추가)
+        # 2. Update Actor Network (with entropy)
         # ----------------------------
         predicted_actions, alpha, _, _ = self.actor(states)
 
-        # 기본 Actor Loss (Q-Value 최대화)
+        # Basic Actor Loss (maximize Q-Value)
         actor_loss = -self.critic(states, predicted_actions).mean()
 
-        # ⭐ 엔트로피 정규화: Alpha가 0.5 근처에 있도록 유도
-        # Alpha가 극단값(0 or 1)으로 가는 것을 방지
+        # ⭐ Entropy regularization: encourage Alpha to stay near 0.5
+        # Prevent Alpha from going to extreme values (0 or 1)
         alpha_entropy = -(
             alpha * torch.log(alpha + 1e-8) + (1 - alpha) * torch.log(1 - alpha + 1e-8)
         ).mean()
 
-        # 총 Loss = Actor Loss - Entropy Bonus
+        # Total Loss = Actor Loss - Entropy Bonus
         total_actor_loss = actor_loss - self.entropy_coef * alpha_entropy
 
         self.actor_optimizer.zero_grad()
@@ -428,7 +430,7 @@ class HybridAgent:
         self.actor_optimizer.step()
 
         # ----------------------------
-        # 3. 타겟 네트워크 Soft Update
+        # 3. Soft Update Target Networks
         # ----------------------------
         self._soft_update(self.actor, self.actor_target)
         self._soft_update(self.critic, self.critic_target)
@@ -436,7 +438,7 @@ class HybridAgent:
         return critic_loss.item(), actor_loss.item()
 
     def _soft_update(self, source, target):
-        """타겟 네트워크를 천천히 업데이트 (Polyak Averaging)"""
+        """Slowly update target network (Polyak Averaging)"""
         for target_param, param in zip(target.parameters(), source.parameters()):
             target_param.data.copy_(
                 self.tau * param.data + (1.0 - self.tau) * target_param.data
