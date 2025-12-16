@@ -14,6 +14,19 @@ from typing import List, Dict, Tuple
 
 
 class GraphConvLayer(nn.Module):
+    """
+    그래프 합성곱 레이어 (Graph Convolutional Layer)
+    
+    주요 기능:
+    - 인접 행렬(adj)을 정규화하여 노드 간 연결 강도를 반영
+    - 선형 변환(Linear)을 통해 노드 특성을 새로운 차원으로 투영
+    - 정규화된 인접 행렬과 투영된 특성을 곱하여 이웃 노드 정보를 집계
+    - ReLU 활성화 함수를 적용하여 비선형성 추가
+    
+    Args:
+        in_features: 입력 특성 차원
+        out_features: 출력 특성 차원
+    """
     def __init__(self, in_features: int, out_features: int):
         super().__init__()
         self.linear = nn.Linear(in_features, out_features)
@@ -31,6 +44,18 @@ class GraphConvLayer(nn.Module):
 
 
 class TemporalAttention(nn.Module):
+    """
+    시간적 어텐션 레이어 (Temporal Attention Layer)
+    
+    주요 기능:
+    - 시계열 데이터에서 각 시점(timestep)의 중요도를 학습
+    - Multi-head Self-Attention을 사용하여 시간적 패턴 포착
+    - 여러 시점의 정보를 종합하여 최종 시점의 임베딩 반환
+    
+    Args:
+        hidden_dim: 히든 레이어 차원
+        num_heads: 어텐션 헤드 수 (기본값: 8)
+    """
     def __init__(self, hidden_dim: int, num_heads: int = 8):
         super().__init__()
         self.attention = nn.MultiheadAttention(hidden_dim, num_heads, batch_first=True)
@@ -43,6 +68,27 @@ class TemporalAttention(nn.Module):
 
 
 class TGNNModel(nn.Module):
+    """
+    시공간 그래프 신경망 모델 (Temporal Graph Neural Network Model)
+    
+    주요 기능:
+    - 주식 데이터의 공간적 관계(종목 간 상관관계)와 시간적 패턴을 동시에 학습
+    - 각 시점별로 GCN 레이어를 적용하여 그래프 구조 정보 반영
+    - Temporal Attention으로 시계열 내 중요 시점 가중치 학습
+    - 최종 Predictor를 통해 다음 기간 수익률 예측
+    
+    구조:
+        1. Input Projection: 입력 특성을 히든 차원으로 변환
+        2. GCN Layers: 그래프 합성곱으로 종목 간 정보 전파
+        3. Temporal Attention: 시간축 정보 통합
+        4. Predictor: 최종 수익률 예측 (MLP)
+    
+    Args:
+        num_features: 입력 특성 수
+        hidden_dims: 각 GCN 레이어의 히든 차원 리스트
+        num_heads: 어텐션 헤드 수
+        num_stocks: 종목 수
+    """
     def __init__(
         self,
         num_features: int,
@@ -90,18 +136,43 @@ class TGNNModel(nn.Module):
 
 
 class TGNNDataset(Dataset):
+    """
+    TGNN 모델 학습용 데이터셋 클래스
+    
+    주요 기능:
+    - 일별 데이터를 월별로 리샘플링하여 월간 수익률 예측에 활용
+    - 슬라이딩 윈도우 방식으로 학습 데이터 생성 (window_size 개월치 데이터 → 다음 달 예측)
+    - 동적 유니버스 지원: 상장/상폐된 종목에 대한 마스킹 처리
+    - 상관계수 × 산업 유사도 기반의 그래프(인접 행렬) 자동 생성
+    
+    데이터 처리 흐름:
+        1. 월별 리샘플링 (각 월 마지막 거래일 데이터 사용)
+        2. 슬라이딩 윈도우로 학습 샘플 생성
+        3. 각 윈도우마다 종목별 활성화 상태(active_mask) 계산
+        4. 활성 종목 기반 그래프 구성 및 라벨(Momentum1M) 생성
+    
+    Args:
+        df: 전체 주가 데이터 (Date, Symbol, feature_cols, Sector 등 포함)
+        window_size: 입력 윈도우 크기 (기본값: 12개월)
+        feature_cols: 사용할 특성 컬럼 리스트
+        symbols: 분석 대상 종목 리스트
+    """
     def __init__(
         self,
         df: pd.DataFrame,
         window_size: int = 12,
         feature_cols: List[str] = None,
         symbols: List[str] = None,
+        start_date: str = None,  # 시작 날짜 (예: "2015-01-01")
+        end_date: str = None,    # 종료 날짜 (예: "2017-12-31")
     ):
         self.df = df.copy()
         self.df["Date"] = pd.to_datetime(self.df["Date"])
         self.window_size = window_size
         self.symbols = symbols if symbols else sorted(df["Symbol"].unique())
         self.feature_cols = feature_cols
+        self.start_date = pd.to_datetime(start_date) if start_date else None
+        self.end_date = pd.to_datetime(end_date) if end_date else None
 
         # 월별 리샘플링
         self.monthly_df = (
@@ -114,7 +185,7 @@ class TGNNDataset(Dataset):
         self.windows = self._create_windows()
 
     def _create_windows(self) -> List[Dict]:
-        """[수정] 동적 유니버스를 위한 윈도우 생성 함수"""
+        """[수정] 동적 유니버스를 위한 윈도우 생성 함수 (기간 필터링 지원)"""
         # 전체 기간의 날짜 목록
         dates = sorted(self.monthly_df["Date"].unique())
         windows = []
@@ -124,6 +195,12 @@ class TGNNDataset(Dataset):
             window_dates = dates[i : i + self.window_size]
             target_date = window_dates[-1]
             next_date = dates[i + self.window_size]
+            
+            # 기간 필터링: next_date 기준으로 필터링 (예측 대상 날짜)
+            if self.start_date and next_date < self.start_date:
+                continue
+            if self.end_date and next_date > self.end_date:
+                continue
 
             window_df = self.monthly_df[self.monthly_df["Date"].isin(window_dates)]
             next_df = self.monthly_df[self.monthly_df["Date"] == next_date]
