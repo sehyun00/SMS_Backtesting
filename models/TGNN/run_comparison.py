@@ -1,5 +1,5 @@
 """
-TGNN 학습 & 리밸런싱 빈도별 백테스팅 비교
+TGNN 학습 & 리밸런싱 빈도별 백테스팅 비교 (연평균 낙폭 추가)
 """
 
 import numpy as np
@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 from model import TGNNModel, TGNNDataset, train_model
+from backtester import Backtester, BacktestConfig, create_metrics_summary_table
 
 # 프로젝트 루트
 ROOT_DIR = Path(__file__).parent.parent.parent
@@ -25,7 +26,6 @@ plt.rcParams["axes.unicode_minus"] = False
 
 # ============ 백테스팅 함수들 ============
 
-
 def softmax(x):
     """배열을 확률 분포(합 1)로 변환"""
     e_x = np.exp(x - np.max(x))
@@ -38,8 +38,47 @@ def custom_collate(batch):
         "features": torch.stack([item["features"] for item in batch]),
         "adj_matrix": torch.stack([item["adj_matrix"] for item in batch]),
         "labels": torch.stack([item["labels"] for item in batch]),
-        # active_mask는 학습에서 제외
     }
+
+
+def calculate_annual_drawdown(portfolio_values, dates):
+    """
+    연평균 낙폭 계산
+    
+    Args:
+        portfolio_values: 포트폴리오 가치 배열
+        dates: 날짜 배열 (pandas datetime)
+    
+    Returns:
+        float: 연평균 낙폭 (%)
+    """
+    portfolio = np.array(portfolio_values)
+    dates = pd.to_datetime(dates)
+    
+    # 연도별로 그룹화
+    df = pd.DataFrame({
+        'date': dates,
+        'value': portfolio
+    })
+    df['year'] = df['date'].dt.year
+    
+    annual_drawdowns = []
+    
+    for year in df['year'].unique():
+        year_data = df[df['year'] == year]['value'].values
+        
+        if len(year_data) < 2:
+            continue
+        
+        # 해당 연도의 MDD 계산
+        running_max = np.maximum.accumulate(year_data)
+        drawdown = (year_data - running_max) / running_max * 100
+        annual_mdd = abs(drawdown.min())
+        
+        annual_drawdowns.append(annual_mdd)
+    
+    # 연평균 낙폭
+    return np.mean(annual_drawdowns) if annual_drawdowns else 0.0
 
 
 def run_buy_and_hold(dataset):
@@ -68,7 +107,7 @@ def run_buy_and_hold(dataset):
 
 
 def run_tgnn_rebalancing(model, dataset, rebalance_freq="monthly"):
-    """[수정] Dynamic Universe를 위한 TGNN 리밸런싱"""
+    """Dynamic Universe를 위한 TGNN 리밸런싱"""
     freq_map = {"monthly": 1, "quarterly": 3, "semiannual": 6, "annual": 12}
     interval = freq_map[rebalance_freq]
 
@@ -78,16 +117,11 @@ def run_tgnn_rebalancing(model, dataset, rebalance_freq="monthly"):
 
     portfolio_values = []
     dates = []
-    # [수정] 초기 웨이트는 0으로 시작
     current_weights = np.zeros(len(dataset.symbols))
 
     with torch.no_grad():
-        # [수정] DataLoader 대신 dataset을 직접 순회
         for idx in range(len(dataset)):
-            # DataLoader의 collate와 같은 역할을 직접 수행
             batch = dataset[idx]
-
-            # 현재 시점의 날짜와 거래 가능 종목 마스크
             date = dataset.windows[idx]["date"]
             active_mask = batch["active_mask"].numpy()
 
@@ -99,19 +133,14 @@ def run_tgnn_rebalancing(model, dataset, rebalance_freq="monthly"):
                 predictions, _ = model(features, adj)
                 pred_returns = predictions.squeeze(0).numpy()
 
-                # [핵심] 상장 전 종목의 예측값을 -무한대로 설정하여 선택 방지
                 pred_returns[~active_mask] = -np.inf
 
-                # 거래 가능한 종목 수
                 n_active = np.sum(active_mask)
-                # Top-K에서 k는 5와 거래 가능 종목 수 중 작은 값
                 k = min(5, n_active)
 
                 new_weights = np.zeros(len(dataset.symbols))
                 if k > 0:
                     top_k_idx = np.argsort(pred_returns)[-k:]
-                    # new_weights[top_k_idx] = 1.0 / k
-
                     top_scores = pred_returns[top_k_idx]
                     new_weights[top_k_idx] = softmax(top_scores)
 
@@ -133,22 +162,25 @@ def run_tgnn_rebalancing(model, dataset, rebalance_freq="monthly"):
     }
 
 
-# ============ 시각화 ============
-
+# ============ 시각화 (4개 subplot 버전) ============
 
 def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_dir):
-    """비교 그래프 생성 (GridSpec 사용으로 축 겹침 해결)"""
+    """비교 그래프 생성 (연평균 낙폭 추가, 개선된 레이아웃)"""
 
-    # 1. 레이아웃 설정 (GridSpec)
-    fig = plt.figure(figsize=(16, 12))
-    gs = fig.add_gridspec(2, 2)  # 2행 2열 그리드
+    # 한글 폰트 재설정 (스타일 적용 시 덮어씌워질 수 있으므로)
+    plt.rcParams["font.family"] = "Malgun Gothic"
+    plt.rcParams["axes.unicode_minus"] = False
+    
+    # 레이아웃 설정 - 상단 누적수익률, 하단 3개 균등 배치
+    fig = plt.figure(figsize=(16, 10))
+    gs = fig.add_gridspec(2, 3, height_ratios=[1.5, 1], hspace=0.3, wspace=0.25)
 
-    # ax1: 윗줄 전체 (0행, 모든 열)
+    # ax1: 윗줄 전체 (누적 수익률)
     ax1 = fig.add_subplot(gs[0, :])
-    # ax2: 아랫줄 왼쪽 (1행, 0열)
+    # ax2, ax3, ax4: 아랫줄 균등 배치
     ax2 = fig.add_subplot(gs[1, 0])
-    # ax3: 아랫줄 오른쪽 (1행, 1열)
     ax3 = fig.add_subplot(gs[1, 1])
+    ax4 = fig.add_subplot(gs[1, 2])
 
     strategies = {
         "1/N 매수 후 보유": buy_and_hold,
@@ -159,48 +191,43 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
     }
 
     colors = ["#2E86AB", "#A23B72", "#F18F01", "#C73E1D", "#6A994E"]
+    labels = ["B&H", "월간", "분기", "반기", "연간"]
 
     # ==========================================
-    # 1. 누적 수익률 그래프 (Top)
+    # 1. 누적 수익률 그래프
     # ==========================================
-    all_returns = []  # Y축 범위 설정을 위해 수집
+    all_returns = []
 
     for (name, data), color in zip(strategies.items(), colors):
         dates = pd.to_datetime(data["dates"])
         initial_value = data["portfolio_values"][0]
-
-        # 수익률 계산 (%)
         returns = [(v / initial_value - 1) * 100 for v in data["portfolio_values"]]
         all_returns.extend(returns)
-
         ax1.plot(dates, returns, label=name, linewidth=2.5, color=color)
 
     ax1.set_title(
-        "리밸런싱 빈도별 누적 수익률 (2015-2025)",
+        "리밸런싱 빈도별 누적 수익률 (2018-2025)",
         fontsize=16,
         fontweight="bold",
-        pad=20,
+        pad=15,
     )
     ax1.set_ylabel("누적 수익률 (%)", fontsize=12, fontweight="bold")
     ax1.set_xlabel("연도", fontsize=12, fontweight="bold")
 
-    # X축 날짜 포맷
     ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     ax1.xaxis.set_major_locator(mdates.YearLocator())
 
-    # Y축 범위 자동 조정 (여유 있게)
     y_min, y_max = min(all_returns), max(all_returns)
     ax1.set_ylim(y_min - 10, y_max * 1.1)
 
-    ax1.legend(loc="upper left", fontsize=11, frameon=True, framealpha=0.9)
+    ax1.legend(loc="upper left", fontsize=10, frameon=True, framealpha=0.9, ncol=5)
     ax1.grid(True, which="major", alpha=0.3, linestyle="--")
     ax1.axhline(y=0, color="black", linestyle="--", linewidth=1)
 
     # ==========================================
-    # 2. CAGR 비교 (Bottom Left)
+    # 2. CAGR 비교
     # ==========================================
     cagr_values = []
-    labels = ["Buy&Hold", "월간", "분기", "반기", "연간"]
 
     for data in [buy_and_hold, monthly, quarterly, semiannual, annual]:
         dates_list = pd.to_datetime(data["dates"])
@@ -209,29 +236,24 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
         cagr = (pow(data["final_capital"] / 1000000, 1 / years) - 1) * 100
         cagr_values.append(cagr)
 
-    bars = ax2.bar(
-        range(5), cagr_values, color=colors, alpha=0.85, edgecolor="black", width=0.6
-    )
+    bars = ax2.bar(range(5), cagr_values, color=colors, alpha=0.85, edgecolor="black", width=0.7)
     ax2.set_xticks(range(5))
-    ax2.set_xticklabels(labels, fontsize=10)
-    ax2.set_title("연평균 수익률 (CAGR)", fontsize=14, fontweight="bold")
+    ax2.set_xticklabels(labels, fontsize=11, fontweight="bold")
+    ax2.set_title("연평균 수익률 (CAGR)", fontsize=13, fontweight="bold", pad=10)
     ax2.set_ylabel("수익률 (%)", fontsize=11)
     ax2.grid(axis="y", alpha=0.3)
+    ax2.set_ylim(0, max(cagr_values) * 1.2)
 
-    # 값 표시
     for bar, value in zip(bars, cagr_values):
         ax2.text(
             bar.get_x() + bar.get_width() / 2.0,
-            bar.get_height() + 1,
+            bar.get_height() + max(cagr_values) * 0.02,
             f"{value:.1f}%",
-            ha="center",
-            va="bottom",
-            fontsize=10,
-            fontweight="bold",
+            ha="center", va="bottom", fontsize=10, fontweight="bold",
         )
 
     # ==========================================
-    # 3. MDD 비교 (Bottom Right)
+    # 3. MDD 비교
     # ==========================================
     mdd_values = []
     for data in [buy_and_hold, monthly, quarterly, semiannual, annual]:
@@ -240,48 +262,68 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
         drawdown = (portfolio - running_max) / running_max * 100
         mdd_values.append(abs(drawdown.min()))
 
-    bars = ax3.bar(
-        range(5), mdd_values, color=colors, alpha=0.85, edgecolor="black", width=0.6
-    )
+    bars = ax3.bar(range(5), mdd_values, color=colors, alpha=0.85, edgecolor="black", width=0.7)
     ax3.set_xticks(range(5))
-    ax3.set_xticklabels(labels, fontsize=10)
-    ax3.set_title("최대 낙폭 (MDD)", fontsize=14, fontweight="bold")
+    ax3.set_xticklabels(labels, fontsize=11, fontweight="bold")
+    ax3.set_title("최대 낙폭 (MDD)", fontsize=13, fontweight="bold", pad=10)
     ax3.set_ylabel("낙폭 (%)", fontsize=11)
     ax3.grid(axis="y", alpha=0.3)
+    ax3.set_ylim(0, max(mdd_values) * 1.2)
 
-    # 값 표시
     for bar, value in zip(bars, mdd_values):
         ax3.text(
             bar.get_x() + bar.get_width() / 2.0,
-            bar.get_height() + 1,
+            bar.get_height() + max(mdd_values) * 0.02,
             f"-{value:.1f}%",
-            ha="center",
-            va="bottom",
-            fontsize=10,
-            fontweight="bold",
-            color="#D32F2F",
+            ha="center", va="bottom", fontsize=10, fontweight="bold", color="#D32F2F",
+        )
+
+    # ==========================================
+    # 4. 연평균 낙폭 비교
+    # ==========================================
+    avg_dd_values = []
+    for data in [buy_and_hold, monthly, quarterly, semiannual, annual]:
+        avg_dd = calculate_annual_drawdown(data["portfolio_values"], data["dates"])
+        avg_dd_values.append(avg_dd)
+
+    bars = ax4.bar(range(5), avg_dd_values, color=colors, alpha=0.85, edgecolor="black", width=0.7)
+    ax4.set_xticks(range(5))
+    ax4.set_xticklabels(labels, fontsize=11, fontweight="bold")
+    ax4.set_title("연평균 낙폭 (Avg DD)", fontsize=13, fontweight="bold", pad=10)
+    ax4.set_ylabel("낙폭 (%)", fontsize=11)
+    ax4.grid(axis="y", alpha=0.3)
+    ax4.set_ylim(0, max(avg_dd_values) * 1.2)
+
+    for bar, value in zip(bars, avg_dd_values):
+        ax4.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            bar.get_height() + max(avg_dd_values) * 0.02,
+            f"-{value:.1f}%",
+            ha="center", va="bottom", fontsize=10, fontweight="bold", color="#1565C0",
         )
 
     # 레이아웃 마무리
     plt.tight_layout()
 
-    save_path = save_dir / "rebalancing_comparison.png"
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    save_path = save_dir / "rebalancing_comparison_with_avgdd.png"
+    plt.savefig(save_path, dpi=300, bbox_inches="tight", facecolor='white')
     print(f"✅ 그래프 저장 완료: {save_path}")
     plt.show()
 
 
 # ============ 메인 실행 ============
 
-
 def main(mode="compare"):
     """
     메인 실행 함수
-
+    
     Args:
         mode: 'train' (학습만) 또는 'compare' (백테스팅 비교)
+    
+    기간 설정:
+        - 학습 기간: 2015-01-01 ~ 2017-12-31
+        - 테스트 기간: 2018-01-01 ~ 2025-12-31
     """
-    # 데이터 로드
     df = pd.read_csv(DATA_PATH)
 
     feature_cols = [
@@ -298,10 +340,11 @@ def main(mode="compare"):
         "Volatility_Factor",
     ]
 
-    # 데이터셋
-    dataset = TGNNDataset(df=df, window_size=12, feature_cols=feature_cols)
+    TRAIN_START = "2015-01-01"
+    TRAIN_END = "2017-12-31"
+    TEST_START = "2018-01-01"
+    TEST_END = "2025-12-31"
 
-    # 모델
     model = TGNNModel(
         num_features=len(feature_cols),
         hidden_dims=[128, 128, 64],
@@ -312,17 +355,27 @@ def main(mode="compare"):
     model_path = Path(__file__).parent / "best_tgnn.pth"
 
     if mode == "train":
-        # ========== 학습 모드 ==========
         print("=" * 60)
         print("TGNN 모델 학습 시작")
+        print(f"학습 기간: {TRAIN_START} ~ {TRAIN_END}")
         print("=" * 60)
 
-        train_size = int(len(dataset) * 0.7)
-        val_size = int(len(dataset) * 0.15)
+        train_dataset = TGNNDataset(
+            df=df,
+            window_size=12,
+            feature_cols=feature_cols,
+            start_date=TRAIN_START,
+            end_date=TRAIN_END,
+        )
 
-        train_data = torch.utils.data.Subset(dataset, range(train_size))
+        print(f"학습 데이터 윈도우 수: {len(train_dataset)}")
+
+        train_size = int(len(train_dataset) * 0.8)
+        val_size = len(train_dataset) - train_size
+
+        train_data = torch.utils.data.Subset(train_dataset, range(train_size))
         val_data = torch.utils.data.Subset(
-            dataset, range(train_size, train_size + val_size)
+            train_dataset, range(train_size, train_size + val_size)
         )
 
         train_loader = DataLoader(
@@ -343,7 +396,6 @@ def main(mode="compare"):
         print("\n✅ 학습 완료!")
 
     elif mode == "compare":
-        # ========== 백테스팅 비교 모드 ==========
         if not model_path.exists():
             print("❌ 모델 파일이 없습니다. 먼저 학습하세요:")
             print("   python run_comparison.py train")
@@ -351,54 +403,85 @@ def main(mode="compare"):
 
         model.load_state_dict(torch.load(model_path))
 
+        test_dataset = TGNNDataset(
+            df=df,
+            window_size=12,
+            feature_cols=feature_cols,
+            start_date=TEST_START,
+            end_date=TEST_END,
+        )
+
         print("=" * 60)
         print("리밸런싱 빈도별 백테스팅 비교")
+        print(f"테스트 기간: {TEST_START} ~ {TEST_END}")
+        print(f"테스트 데이터 윈도우 수: {len(test_dataset)}")
         print("=" * 60)
 
-        # 실행
         print("\n[1/5] 1/N Buy & Hold...")
-        buy_and_hold = run_buy_and_hold(dataset)
+        buy_and_hold = run_buy_and_hold(test_dataset)
 
         print("[2/5] TGNN 월간 리밸런싱...")
-        monthly = run_tgnn_rebalancing(model, dataset, "monthly")
+        monthly = run_tgnn_rebalancing(model, test_dataset, "monthly")
 
         print("[3/5] TGNN 분기 리밸런싱...")
-        quarterly = run_tgnn_rebalancing(model, dataset, "quarterly")
+        quarterly = run_tgnn_rebalancing(model, test_dataset, "quarterly")
 
         print("[4/5] TGNN 반기 리밸런싱...")
-        semiannual = run_tgnn_rebalancing(model, dataset, "semiannual")
+        semiannual = run_tgnn_rebalancing(model, test_dataset, "semiannual")
 
         print("[5/5] TGNN 연간 리밸런싱...")
-        annual = run_tgnn_rebalancing(model, dataset, "annual")
+        annual = run_tgnn_rebalancing(model, test_dataset, "annual")
 
-        # 결과 요약
+        # 결과 요약 (연평균 낙폭 추가)
         print("\n" + "=" * 60)
         print("결과 요약")
         print("=" * 60)
 
+        strategies_data = [buy_and_hold, monthly, quarterly, semiannual, annual]
+        strategy_names = [
+            "1/N Buy & Hold",
+            "TGNN (월간)",
+            "TGNN (분기)",
+            "TGNN (반기)",
+            "TGNN (연간)",
+        ]
+
+        # CAGR 계산
+        cagr_list = []
+        for data in strategies_data:
+            dates_list = pd.to_datetime(data["dates"])
+            days = (dates_list.max() - dates_list.min()).days
+            years = days / 365.25
+            cagr = (pow(data["final_capital"] / 1000000, 1 / years) - 1) * 100
+            cagr_list.append(f"{cagr:.2f}%")
+
+        # MDD 계산
+        mdd_list = []
+        for data in strategies_data:
+            portfolio = np.array(data["portfolio_values"])
+            running_max = np.maximum.accumulate(portfolio)
+            drawdown = (portfolio - running_max) / running_max * 100
+            mdd = abs(drawdown.min())
+            mdd_list.append(f"-{mdd:.2f}%")
+
+        # 연평균 낙폭 계산
+        avg_dd_list = []
+        for data in strategies_data:
+            avg_dd = calculate_annual_drawdown(data["portfolio_values"], data["dates"])
+            avg_dd_list.append(f"-{avg_dd:.2f}%")
+
         results_df = pd.DataFrame(
             {
-                "전략": [
-                    "1/N Buy & Hold",
-                    "TGNN (월간)",
-                    "TGNN (분기)",
-                    "TGNN (반기)",
-                    "TGNN (연간)",
-                ],
+                "전략": strategy_names,
                 "최종 자산 (원)": [
-                    f"{buy_and_hold['final_capital']:,.0f}",
-                    f"{monthly['final_capital']:,.0f}",
-                    f"{quarterly['final_capital']:,.0f}",
-                    f"{semiannual['final_capital']:,.0f}",
-                    f"{annual['final_capital']:,.0f}",
+                    f"{data['final_capital']:,.0f}" for data in strategies_data
                 ],
                 "누적 수익률": [
-                    f"{buy_and_hold['cumulative_return']:.2f}%",
-                    f"{monthly['cumulative_return']:.2f}%",
-                    f"{quarterly['cumulative_return']:.2f}%",
-                    f"{semiannual['cumulative_return']:.2f}%",
-                    f"{annual['cumulative_return']:.2f}%",
+                    f"{data['cumulative_return']:.2f}%" for data in strategies_data
                 ],
+                "CAGR": cagr_list,
+                "MDD": mdd_list,
+                "연평균 낙폭": avg_dd_list,
             }
         )
 
@@ -412,8 +495,70 @@ def main(mode="compare"):
         plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_dir)
 
         # CSV 저장
-        results_df.to_csv(save_dir / "comparison_results.csv", index=False)
+        results_df.to_csv(save_dir / "comparison_results_with_avgdd.csv", index=False)
+        
+        # ========== 상세 백테스팅 (Backtester 사용) ==========
+        print("\n" + "=" * 60)
+        print("상세 백테스팅 분석 진행 중...")
+        print("=" * 60)
+        
+        config = BacktestConfig(initial_capital=1000000, cost_bps=5.0, risk_free_rate=0.03)
+        all_metrics = {}
+        
+        # Buy & Hold
+        print("[1/5] Buy & Hold 상세 분석...")
+        bt_buyhold = Backtester(model, test_dataset, config, "Buy_Hold")
+        bt_buyhold.run_buy_and_hold()
+        bt_buyhold.save_timeseries_csv(save_dir / "timeseries_buyhold.csv")
+        all_metrics["Buy_Hold"] = bt_buyhold.metrics
+        
+        # TGNN 월간
+        print("[2/5] TGNN 월간 상세 분석...")
+        bt_monthly = Backtester(model, test_dataset, config, "TGNN_Monthly")
+        bt_monthly.run("monthly")
+        bt_monthly.save_timeseries_csv(save_dir / "timeseries_monthly.csv")
+        all_metrics["TGNN_Monthly"] = bt_monthly.metrics
+        
+        # TGNN 분기
+        print("[3/5] TGNN 분기 상세 분석...")
+        bt_quarterly = Backtester(model, test_dataset, config, "TGNN_Quarterly")
+        bt_quarterly.run("quarterly")
+        bt_quarterly.save_timeseries_csv(save_dir / "timeseries_quarterly.csv")
+        all_metrics["TGNN_Quarterly"] = bt_quarterly.metrics
+        
+        # TGNN 반기
+        print("[4/5] TGNN 반기 상세 분석...")
+        bt_semiannual = Backtester(model, test_dataset, config, "TGNN_Semiannual")
+        bt_semiannual.run("semiannual")
+        bt_semiannual.save_timeseries_csv(save_dir / "timeseries_semiannual.csv")
+        all_metrics["TGNN_Semiannual"] = bt_semiannual.metrics
+        
+        # TGNN 연간
+        print("[5/5] TGNN 연간 상세 분석...")
+        bt_annual = Backtester(model, test_dataset, config, "TGNN_Annual")
+        bt_annual.run("annual")
+        bt_annual.save_timeseries_csv(save_dir / "timeseries_annual.csv")
+        all_metrics["TGNN_Annual"] = bt_annual.metrics
+        
+        # 집계 지표 JSON 저장
+        bt_monthly.save_metrics_json(save_dir / "metrics_summary.json", all_metrics)
+        
+        # 상세 지표 테이블 출력
+        print("\n" + "=" * 60)
+        print("상세 지표 요약")
+        print("=" * 60)
+        metrics_table = create_metrics_summary_table(all_metrics)
+        print(metrics_table.to_string(index=False))
+        
+        # 상세 지표 CSV 저장
+        metrics_table.to_csv(save_dir / "metrics_comparison.csv", index=False, encoding="utf-8-sig")
+        
         print(f"\n✅ 완료! 결과는 {save_dir}/ 에 저장되었습니다.")
+        print("저장된 파일:")
+        print("  - comparison_results_with_avgdd.csv (요약)")
+        print("  - timeseries_*.csv (시계열 데이터)")
+        print("  - metrics_summary.json (집계 지표)")
+        print("  - metrics_comparison.csv (지표 비교 테이블)")
 
 
 if __name__ == "__main__":
