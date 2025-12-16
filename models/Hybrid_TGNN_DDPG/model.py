@@ -8,7 +8,7 @@ import random
 
 # ==================== 1. TGNN Logic (State Encoder) ====================
 
-
+#ㅇㅇ
 class GraphConvLayer(nn.Module):
     """
     Graph Convolutional Layer
