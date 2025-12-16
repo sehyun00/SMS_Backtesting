@@ -122,6 +122,10 @@ class HybridActor(nn.Module):
         self.window_size = window_size
         self.num_features = num_features
 
+        # Constraint parameters
+        self.MIN_WEIGHT = 0.05  # 5% minimum per stock
+        self.MAX_WEIGHT = 0.20  # 20% maximum per stock
+
         # TGNN path
         self.tgnn_encoder = TGNNEncoder(num_features)
         tgnn_input_dim = num_stocks * self.tgnn_encoder.out_dim
@@ -168,6 +172,71 @@ class HybridActor(nn.Module):
             nn.Sigmoid(),
         )
 
+    def _enforce_constraints(self, weights, max_iter=10):
+        """
+        🔥 Iterative Projection: Enforce constraints while maintaining sum=1
+        
+        This method ensures:
+        1. MIN_WEIGHT <= w_i <= MAX_WEIGHT for all stocks
+        2. sum(w) = 1.0
+        3. No bypass through normalization
+        
+        Algorithm:
+        - Iteratively adjust weights that violate constraints
+        - Redistribute excess/deficit to feasible stocks
+        - Converge to a valid solution
+        """
+        MIN_W = self.MIN_WEIGHT
+        MAX_W = self.MAX_WEIGHT
+        eps = 1e-4  # Convergence tolerance
+        
+        for iteration in range(max_iter):
+            # Step 1: Clamp to [MIN_W, MAX_W]
+            weights_clamped = torch.clamp(weights, MIN_W, MAX_W)
+            
+            # Step 2: Check current sum
+            current_sum = weights_clamped.sum(dim=-1, keepdim=True)
+            
+            # Step 3: If sum is close to 1.0, we're done
+            if torch.allclose(current_sum, torch.ones_like(current_sum), atol=eps):
+                weights = weights_clamped
+                break
+            
+            # Step 4: Redistribute excess/deficit
+            deficit = 1.0 - current_sum  # How much we need to add/subtract
+            
+            if deficit > 0:  # Need to increase weights
+                # Find stocks that have room to grow (below MAX_W)
+                room_to_grow = MAX_W - weights_clamped
+                total_room = room_to_grow.sum(dim=-1, keepdim=True)
+                
+                # Distribute deficit proportionally to available room
+                if total_room > eps:
+                    adjustment = deficit * (room_to_grow / (total_room + 1e-8))
+                    weights = weights_clamped + adjustment
+                else:
+                    # No room to grow - uniformly distribute
+                    weights = weights_clamped + deficit / self.num_stocks
+                    
+            else:  # deficit < 0, need to decrease weights
+                # Find stocks that have room to shrink (above MIN_W)
+                room_to_shrink = weights_clamped - MIN_W
+                total_room = room_to_shrink.sum(dim=-1, keepdim=True)
+                
+                # Distribute excess proportionally to available room
+                if total_room > eps:
+                    adjustment = deficit * (room_to_shrink / (total_room + 1e-8))
+                    weights = weights_clamped + adjustment
+                else:
+                    # No room to shrink - uniformly distribute
+                    weights = weights_clamped + deficit / self.num_stocks
+        
+        # Final safety: clamp and normalize
+        weights = torch.clamp(weights, MIN_W, MAX_W)
+        weights = weights / (weights.sum(dim=-1, keepdim=True) + 1e-8)
+        
+        return weights
+
     def forward(self, state):
         batch = state.shape[0]
         feat_size = self.num_stocks * self.window_size * self.num_features
@@ -180,8 +249,8 @@ class HybridActor(nn.Module):
         )
         adj = adj_flat.reshape(batch, self.num_stocks, self.num_stocks)
 
-        # ============ 🔥 Modified: Increase temperature for more uniform distribution ============
-        temperature = 5.0  # Changed from 2.5 to 5.0 for better diversification
+        # Temperature for softmax
+        temperature = 5.0
 
         # TGNN path
         tgnn_embeddings = self.tgnn_encoder(features, adj)
@@ -202,15 +271,8 @@ class HybridActor(nn.Module):
         # Final combination
         final_weights = alpha * tgnn_weights + (1 - alpha) * ddpg_weights
 
-        # ============ 🔥 Modified: Stronger diversification constraints ============
-        # Prevent extreme concentration
-        MAX_WEIGHT = 0.30  # Changed from 0.95 to 0.30 (max 30% per stock)
-        MIN_WEIGHT = 0.03  # Added: min 3% per stock (forced diversification)
-        
-        final_weights = torch.clamp(final_weights, MIN_WEIGHT, MAX_WEIGHT)
-
-        # Normalize
-        final_weights = final_weights / (final_weights.sum(dim=-1, keepdim=True) + 1e-8)
+        # 🔥 NEW: Use iterative projection instead of clamp+normalize
+        final_weights = self._enforce_constraints(final_weights)
 
         return final_weights, alpha.squeeze(-1), tgnn_weights, ddpg_weights
 
