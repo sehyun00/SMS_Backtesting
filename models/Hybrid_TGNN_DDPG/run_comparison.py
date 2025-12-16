@@ -343,15 +343,13 @@ class HybridPortfolioEnv:
             else:  # Below 4%: no penalty
                 volatility_penalty = 0
 
-            # 6. Concentration penalty (smooth curve)
-            # Target: HHI below 0.20 (5 stocks equal = 0.20)
-            if concentration > 0.30:  # Extreme concentration
-                concentration_penalty = 200.0 * (concentration - 0.30) ** 2
-            elif concentration > 0.25:  # High concentration
-                concentration_penalty = 100.0 * (concentration - 0.25) ** 2
-            elif concentration > 0.20:  # Slight concentration
-                concentration_penalty = 40.0 * (concentration - 0.20) ** 2
-            else:  # Appropriate diversification
+            # ============ 🔥 Modified: MUCH STRONGER concentration penalty ============
+            # Target: HHI below 0.15 (approximately 6-7 stocks)
+            # Changed from gradual penalties to immediate strong cubic penalty
+            if concentration > 0.15:
+                # Cubic penalty for severe punishment of concentration
+                concentration_penalty = 1000.0 * (concentration - 0.15) ** 3
+            else:
                 concentration_penalty = 0
 
             # 7. Diversity bonus (entropy-based)
@@ -374,7 +372,7 @@ class HybridPortfolioEnv:
                 - downside_penalty  # Downside risk
                 - mdd_penalty  # MDD (Core!)
                 - volatility_penalty  # Volatility
-                - concentration_penalty  # Concentration
+                - concentration_penalty  # Concentration (STRENGTHENED!)
                 + diversity_bonus  # Diversity
             )
 
