@@ -203,33 +203,40 @@ class HybridActor(nn.Module):
                 break
             
             # Step 4: Redistribute excess/deficit
-            deficit = 1.0 - current_sum  # How much we need to add/subtract
+            deficit = 1.0 - current_sum  # (Batch, 1)
             
-            if deficit > 0:  # Need to increase weights
-                # Find stocks that have room to grow (below MAX_W)
-                room_to_grow = MAX_W - weights_clamped
-                total_room = room_to_grow.sum(dim=-1, keepdim=True)
-                
-                # Distribute deficit proportionally to available room
-                if total_room > eps:
-                    adjustment = deficit * (room_to_grow / (total_room + 1e-8))
-                    weights = weights_clamped + adjustment
-                else:
-                    # No room to grow - uniformly distribute
-                    weights = weights_clamped + deficit / self.num_stocks
-                    
-            else:  # deficit < 0, need to decrease weights
-                # Find stocks that have room to shrink (above MIN_W)
-                room_to_shrink = weights_clamped - MIN_W
-                total_room = room_to_shrink.sum(dim=-1, keepdim=True)
-                
-                # Distribute excess proportionally to available room
-                if total_room > eps:
-                    adjustment = deficit * (room_to_shrink / (total_room + 1e-8))
-                    weights = weights_clamped + adjustment
-                else:
-                    # No room to shrink - uniformly distribute
-                    weights = weights_clamped + deficit / self.num_stocks
+            # 🔥 Fixed: Use element-wise operations instead of scalar comparison
+            # Check if we need to increase or decrease weights
+            need_increase = (deficit > 0)  # (Batch, 1) boolean tensor
+            
+            # Find stocks that have room to adjust
+            room_to_grow = MAX_W - weights_clamped  # (Batch, N)
+            room_to_shrink = weights_clamped - MIN_W  # (Batch, N)
+            
+            # For increasing: distribute to stocks with room to grow
+            total_room_grow = room_to_grow.sum(dim=-1, keepdim=True)  # (Batch, 1)
+            adjustment_grow = torch.where(
+                total_room_grow > eps,
+                deficit * (room_to_grow / (total_room_grow + 1e-8)),
+                deficit / self.num_stocks
+            )
+            
+            # For decreasing: take from stocks with room to shrink
+            total_room_shrink = room_to_shrink.sum(dim=-1, keepdim=True)  # (Batch, 1)
+            adjustment_shrink = torch.where(
+                total_room_shrink > eps,
+                deficit * (room_to_shrink / (total_room_shrink + 1e-8)),
+                deficit / self.num_stocks
+            )
+            
+            # Apply appropriate adjustment based on need_increase
+            adjustment = torch.where(
+                need_increase,
+                adjustment_grow,
+                adjustment_shrink
+            )
+            
+            weights = weights_clamped + adjustment
         
         # Final safety: clamp and normalize
         weights = torch.clamp(weights, MIN_W, MAX_W)
