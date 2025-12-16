@@ -274,7 +274,10 @@ class HybridActor(nn.Module):
         # Ensemble
         ensemble_input = torch.cat([state, tgnn_weights, ddpg_weights], dim=-1)
         alpha_raw = self.ensemble_weight_net(ensemble_input)
-        alpha = 0.3 + 0.4 * torch.sigmoid(alpha_raw)
+        
+        # Expanded range: Use full 0.0 ~ 1.0 range directly from the network output
+        # (ensemble_weight_net already includes Sigmoid)
+        alpha = alpha_raw
 
         # Final combination
         final_weights = alpha * tgnn_weights + (1 - alpha) * ddpg_weights

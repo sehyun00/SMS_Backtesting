@@ -235,7 +235,6 @@ class HybridDataset:
 
 # ============ Portfolio Environment ============
 
-
 class HybridPortfolioEnv:
     """
     Reinforcement Learning Environment
@@ -278,9 +277,11 @@ class HybridPortfolioEnv:
         w = self.windows[self.current_step]
         returns = w["labels"]
 
+        # 1. 포트폴리오 수익률 계산
         portfolio_return_pct = np.dot(action, returns)
         portfolio_return = portfolio_return_pct / 100.0
 
+        # 2. 회전율(Turnover) 계산 및 비용 반영
         turnover = np.sum(np.abs(action - self.prev_weights))
         cost = turnover * self.cost_bps
         net_return = portfolio_return - cost
@@ -291,6 +292,9 @@ class HybridPortfolioEnv:
 
         self.return_history.append(net_return)
 
+        # ----------------------------------------------------------------------
+        # Reward Calculation
+        # ----------------------------------------------------------------------
         if len(self.return_history) >= 6:
             returns_array = np.array(self.return_history[-12:])
             mean_return = np.mean(returns_array)
@@ -303,84 +307,81 @@ class HybridPortfolioEnv:
             concentration = np.sum(action**2)  # HHI
             volatility = np.std(returns_array)
 
-            # ============ 🔥 Sophisticated Reward Function Design ============
-
-            # 1. Return component (REDUCED from 100 to 50)
-            return_reward = mean_return * 50  # 🔥 Changed: 100 → 50
+            # 1. Return component
+            return_reward = mean_return * 50
 
             # 2. Risk adjustment (Sharpe-like)
             risk_adjusted_return = mean_return / (volatility + 1e-8)
             sharpe_bonus = risk_adjusted_return * 30.0
 
-            # 3. Downside risk (Sortino-like)
+            # 3. Downside risk
             downside_penalty = 50.0 * downside_std
 
-            # 4. MDD penalty (Core!)
+            # 4. MDD penalty
             if len(self.return_history) >= 12:
                 cumulative_returns = np.cumprod(1 + np.array(self.return_history[-12:]))
                 peak = np.maximum.accumulate(cumulative_returns)
                 drawdowns = (cumulative_returns - peak) / peak
                 current_mdd = abs(min(drawdowns))
 
-                # Nonlinear penalty according to MDD
-                if current_mdd > 0.30:  # Over 30%: extreme penalty
-                    mdd_penalty = 800.0 * (current_mdd - 0.30) ** 2
-                elif current_mdd > 0.25:  # 25-30%: strong penalty
-                    mdd_penalty = 400.0 * (current_mdd - 0.25) ** 2
-                elif current_mdd > 0.20:  # 20-25%: moderate penalty
-                    mdd_penalty = 150.0 * (current_mdd - 0.20) ** 2
-                else:  # Below 20%: no penalty
+                if current_mdd > 0.25:
+                    mdd_penalty = 1200.0 * (current_mdd - 0.25) ** 2
+                elif current_mdd > 0.20:
+                    mdd_penalty = 600.0 * (current_mdd - 0.20) ** 2
+                elif current_mdd > 0.15:
+                    mdd_penalty = 200.0 * (current_mdd - 0.15) ** 2
+                else:
                     mdd_penalty = 0
             else:
                 mdd_penalty = 0
 
-            # 5. Volatility penalty (smooth curve)
-            # Target: monthly volatility below 4%
-            if volatility > 0.06:  # Over 6%: strong penalty
-                volatility_penalty = 100.0 * (volatility - 0.06) ** 2
-            elif volatility > 0.04:  # 4-6%: weak penalty
-                volatility_penalty = 30.0 * (volatility - 0.04) ** 2
-            else:  # Below 4%: no penalty
+            # 5. Volatility penalty
+            if volatility > 0.05:
+                volatility_penalty = 150.0 * (volatility - 0.05) ** 2
+            elif volatility > 0.035:
+                volatility_penalty = 50.0 * (volatility - 0.035) ** 2
+            else:
                 volatility_penalty = 0
 
-            # ============ 🔥 Modified: EXTREME concentration penalty ============
-            # Target: HHI below 0.12 (approximately 8-9 stocks)
-            # Changed: threshold 0.15 → 0.12, penalty 1000x³ → 5000x⁴
+            # 6. Concentration penalty (HHI)
             if concentration > 0.12:
-                # Quartic penalty (4th power) for EXTREME punishment
                 concentration_penalty = 5000.0 * (concentration - 0.12) ** 4
             else:
                 concentration_penalty = 0
 
-            # 7. Diversity bonus (entropy-based)
+            # 7. Diversity bonus
             entropy = -np.sum(action * np.log(action + 1e-10))
             max_entropy = np.log(len(action))
             normalized_entropy = entropy / max_entropy
 
-            # Higher entropy gives more bonus
-            if normalized_entropy > 0.85:  # Very equal (8-9 stocks)
+            if normalized_entropy > 0.85:
                 diversity_bonus = 60.0 * normalized_entropy
-            elif normalized_entropy > 0.75:  # Moderately equal (6-7 stocks)
+            elif normalized_entropy > 0.75:
                 diversity_bonus = 40.0 * normalized_entropy
-            else:  # Concentrated (4-5 stocks)
+            else:
                 diversity_bonus = 20.0 * normalized_entropy
 
-            # ============ 🔥 Final Reward Function ============
+            # 8. Turnover Penalty (회전율 페널티)
+            turnover_penalty = turnover * 20.0
+
+            # 🔥 Final Reward
             reward = (
-                return_reward  # Return (REDUCED! 50 instead of 100)
-                + sharpe_bonus  # Risk-adjusted return
-                - downside_penalty  # Downside risk
-                - mdd_penalty  # MDD (Core!)
-                - volatility_penalty  # Volatility
-                - concentration_penalty  # Concentration (EXTREME PENALTY!)
-                + diversity_bonus  # Diversity
+                return_reward
+                + sharpe_bonus
+                - downside_penalty
+                - mdd_penalty
+                - volatility_penalty
+                - concentration_penalty
+                + diversity_bonus
+                - turnover_penalty
             )
 
         else:
-            # Initial few steps: simple reward
-            reward = net_return * 100
+            # 초기 단계 보상 (회전율 페널티 약하게 적용)
+            reward = (net_return * 100) - (turnover * 5.0)
 
         self.prev_weights = action
+        
         next_state = (
             self._get_state(self.current_step)
             if not done
@@ -397,6 +398,7 @@ class HybridPortfolioEnv:
         }
 
         return next_state, reward, done, info
+
 
 
 # ============ Training and Execution Logic ============
