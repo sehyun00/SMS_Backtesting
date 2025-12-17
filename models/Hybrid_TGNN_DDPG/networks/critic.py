@@ -5,7 +5,7 @@ Q-Value를 평가하는 Critic 네트워크
 
 import torch
 import torch.nn as nn
-from .tgnn_encoder import TGNNEncoder
+from networks.tgnn_encoder import TGNNEncoder
 
 
 class HybridCritic(nn.Module):
