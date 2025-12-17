@@ -152,7 +152,7 @@ def run_hybrid_rebalancing(agent, dataset, freq="monthly"):
 
         # 수익률 계산
         ret = np.dot(current_weights, w["labels"])
-        capital *= 1 + ret / 100
+        capital *= 1 + ret
         portfolio_history.append(capital)
         peak = max(peak, capital)
         dd = (capital - peak) / peak
@@ -212,7 +212,17 @@ def run_fixed_weights(dataset, strategy_name="1/N Buy & Hold"):
             trade_logs.append(log)
 
         ret = np.dot(current_weights, w["labels"])
-        capital *= 1 + ret / 100
+        ret = float(ret)  # ✅ 명시적으로 float 변환
+        capital *= 1.0 + ret
+
+        if i < 3:
+            print(
+                f"[DEBUG] Month {i}: ret={ret:.4f}, capital before={capital:.0f}",
+                end="",
+            )
+        if i < 3:
+            print(f", after={capital:.0f}")
+
         peak = max(peak, capital)
         dd = (capital - peak) / peak
 
