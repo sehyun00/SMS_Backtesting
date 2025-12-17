@@ -42,7 +42,7 @@ class GraphConvLayer(nn.Module):
 
         return F.relu(output)
 
-
+#DD
 class TemporalAttention(nn.Module):
     """
     시간적 어텐션 레이어 (Temporal Attention Layer)
@@ -163,8 +163,8 @@ class TGNNDataset(Dataset):
         window_size: int = 12,
         feature_cols: List[str] = None,
         symbols: List[str] = None,
-        start_date: str = None,  # 시작 날짜 (예: "2015-01-01")
-        end_date: str = None,    # 종료 날짜 (예: "2017-12-31")
+        start_date: str = None,
+        end_date: str = None,
     ):
         self.df = df.copy()
         self.df["Date"] = pd.to_datetime(self.df["Date"])
@@ -174,6 +174,8 @@ class TGNNDataset(Dataset):
         self.start_date = pd.to_datetime(start_date) if start_date else None
         self.end_date = pd.to_datetime(end_date) if end_date else None
 
+        # ✅ 정규화 제거 (run_train_test.py에서 이미 처리함)
+        
         # 월별 리샘플링
         self.monthly_df = (
             self.df.set_index("Date")
@@ -327,53 +329,79 @@ class TGNNDataset(Dataset):
 
 # ============ 학습 함수 ============
 
-
 def train_model(
     model: TGNNModel,
     train_loader: DataLoader,
     val_loader: DataLoader,
     num_epochs: int = 300,
-    lr: float = 1e-4,
+    lr: float = 1e-5,  # ✅ 기본값 낮춤
     save_path: str = "best_tgnn.pth",
 ):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
+    
+    # ✅ Gradient Clipping 값
+    max_grad_norm = 0.5
 
     best_val_loss = float("inf")
+    patience = 20
+    patience_counter = 0
 
     for epoch in range(num_epochs):
         # Train
         model.train()
         train_loss = 0
+        train_batches = 0
 
         for batch in train_loader:
             predictions, _ = model(batch["features"], batch["adj_matrix"])
             loss = criterion(predictions, batch["labels"])
+            
+            # ✅ NaN/Inf 체크
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"⚠️  Epoch {epoch}: Loss is NaN/Inf, skipping batch")
+                continue
 
             optimizer.zero_grad()
             loss.backward()
+            
+            # ✅ Gradient Clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+            
             optimizer.step()
 
             train_loss += loss.item()
+            train_batches += 1
 
         # Validation
         model.eval()
         val_loss = 0
+        val_batches = 0
 
         with torch.no_grad():
             for batch in val_loader:
                 predictions, _ = model(batch["features"], batch["adj_matrix"])
                 loss = criterion(predictions, batch["labels"])
-                val_loss += loss.item()
+                
+                if not torch.isnan(loss) and not torch.isinf(loss):
+                    val_loss += loss.item()
+                    val_batches += 1
 
-        train_loss /= len(train_loader)
-        val_loss /= len(val_loader)
+        avg_train_loss = train_loss / max(train_batches, 1)
+        avg_val_loss = val_loss / max(val_batches, 1)
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        # Early Stopping
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
             torch.save(model.state_dict(), save_path)
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print(f"\nEarly stopping at epoch {epoch}")
+                break
 
         if epoch % 10 == 0:
-            print(f"Epoch {epoch}: Train={train_loss:.6f}, Val={val_loss:.6f}")
+            print(f"Epoch {epoch}: Train={avg_train_loss:.6f}, Val={avg_val_loss:.6f}, Best Val={best_val_loss:.6f}")
 
-    print(f"\n최적 모델 저장: {save_path}")
+    print(f"\n최적 모델 저장: {save_path} (Best Val Loss: {best_val_loss:.6f})")
