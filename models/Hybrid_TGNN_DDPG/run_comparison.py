@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 from pathlib import Path
 import matplotlib
+from training_monitor import TrainingMonitor
 
 matplotlib.use("Agg")
 import warnings
@@ -35,20 +36,29 @@ print(f"📂 Test data: {TEST_DATA_PATH.name}\n")
 # ==========================================
 # 학습 함수
 # ==========================================
-def train_hybrid(agent, env, num_episodes=200):
+def train_hybrid(agent, env, num_episodes=200, save_dir=None):
     """
-    Hybrid 에이전트 학습 루프
+    Hybrid 에이전트 학습 루프 (모니터링 추가)
 
     Args:
         agent: HybridAgent 인스턴스
         env: HybridPortfolioEnv 인스턴스
         num_episodes: 학습 에피소드 수
+        save_dir: 모니터링 결과 저장 디렉토리
     """
     print(f"🚀 Starting Hybrid model training: Total {num_episodes} episodes")
+
+    # 학습 모니터 초기화
+    if save_dir:
+        monitor = TrainingMonitor(save_dir / "training_logs", save_interval=50)
+    else:
+        monitor = None
 
     for episode in range(num_episodes):
         state = env.reset()
         episode_reward = 0
+        episode_returns = []
+        episode_values = []
         noise_std = max(0.01, 0.2 - episode * 0.002)
 
         while True:
@@ -62,15 +72,43 @@ def train_hybrid(agent, env, num_episodes=200):
                 agent.train(batch_size=64)
 
             episode_reward += reward
+            episode_returns.append(info.get("return", 0.0))
+            episode_values.append(info.get("portfolio_value", 1000000))
+
             state = next_state
 
             if done:
                 break
 
+        # 에피소드 성과 계산
+        avg_return = np.mean(episode_returns) if episode_returns else 0.0
+
+        # MDD 계산
+        values = np.array(episode_values)
+        if len(values) > 0:
+            peak = np.maximum.accumulate(values)
+            drawdowns = (values - peak) / peak
+            mdd = abs(min(drawdowns)) if len(drawdowns) > 0 else 0.0
+        else:
+            mdd = 0.0
+
+        # Sharpe 계산 (간단 버전)
+        if len(episode_returns) > 1:
+            sharpe = np.mean(episode_returns) / (np.std(episode_returns) + 1e-8)
+        else:
+            sharpe = 0.0
+
+        # 모니터에 기록
+        if monitor:
+            monitor.record_episode(
+                episode, episode_reward, avg_return, mdd, sharpe, alpha_value
+            )
+
         if (episode + 1) % 10 == 0:
             print(
                 f"{episode + 1:3d}/{num_episodes} | Reward: {episode_reward:7.2f} | "
-                f"Noise: {noise_std:.3f} | Alpha: {alpha_value:.3f}"
+                f"Return: {avg_return * 100:5.2f}% | MDD: {mdd * 100:5.2f}% | "
+                f"Sharpe: {sharpe:.3f} | Alpha: {alpha_value:.3f}"
             )
 
 
@@ -318,8 +356,12 @@ def main(mode="compare"):
         train_windows = dataset.get_train_windows()
         train_env = HybridPortfolioEnv(dataset, windows=train_windows)
 
-        train_hybrid(agent, train_env, num_episodes=200)
-        # train_hybrid(agent, train_env, num_episodes=2)  # 테스트용
+        # 저장 디렉토리 설정
+        save_dir = ROOT_DIR / "results" / "03_Hybrid_TGNN_DDPG"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # 학습 실행 (save_dir 추가)
+        train_hybrid(agent, train_env, num_episodes=200, save_dir=save_dir)
 
         torch.save(agent.actor.state_dict(), model_path)
         print(f"✅ Model saved successfully: {model_path}")
