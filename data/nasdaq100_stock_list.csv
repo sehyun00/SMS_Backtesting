@@ -1,0 +1,102 @@
+Symbol,name,Sector,industry
+ADBE,Adobe Inc.,Technology,Software - Application
+AMD,Advanced Micro Devices,Technology,Semiconductors
+ABNB,Airbnb,Consumer Cyclical,Travel Services
+GOOGL,Alphabet Inc. (Class A),Communication Services,Internet Content & Information
+GOOG,Alphabet Inc. (Class C),Communication Services,Internet Content & Information
+AMZN,Amazon,Consumer Cyclical,Internet Retail
+AEP,American Electric Power,Utilities,Utilities - Regulated Electric
+AMGN,Amgen,Healthcare,Drug Manufacturers - General
+ADI,Analog Devices,Technology,Semiconductors
+AAPL,Apple Inc.,Technology,Consumer Electronics
+AMAT,Applied Materials,Technology,Semiconductor Equipment & Materials
+APP,AppLovin,Communication Services,Advertising Agencies
+ARM,Arm Holdings,Technology,Semiconductors
+ASML,ASML Holding,Technology,Semiconductor Equipment & Materials
+AZN,AstraZeneca,Healthcare,Drug Manufacturers - General
+TEAM,Atlassian,Technology,Software - Application
+ADSK,Autodesk,Technology,Software - Application
+ADP,Automatic Data Processing,Technology,Software - Application
+AXON,Axon Enterprise,Industrials,Aerospace & Defense
+BKR,Baker Hughes,Energy,Oil & Gas Equipment & Services
+BIIB,Biogen,Healthcare,Drug Manufacturers - General
+BKNG,Booking Holdings,Consumer Cyclical,Travel Services
+AVGO,Broadcom,Technology,Semiconductors
+CDNS,Cadence Design Systems,Technology,Software - Application
+CDW,CDW Corporation,Technology,Information Technology Services
+CHTR,Charter Communications,Communication Services,Telecom Services
+CTAS,Cintas,Industrials,Specialty Business Services
+CSCO,Cisco,Technology,Communication Equipment
+CCEP,Coca-Cola Europacific Partners,Consumer Defensive,Beverages - Non-Alcoholic
+CTSH,Cognizant,Technology,Information Technology Services
+CMCSA,Comcast,Communication Services,Telecom Services
+CEG,Constellation Energy,Utilities,Utilities - Independent Power Producers
+CPRT,Copart,Industrials,Specialty Business Services
+CSGP,CoStar Group,Real Estate,Real Estate Services
+COST,Costco,Consumer Defensive,Discount Stores
+CRWD,CrowdStrike,Technology,Software - Infrastructure
+CSX,CSX Corporation,Industrials,Railroads
+DDOG,Datadog,Technology,Software - Application
+DXCM,DexCom,Healthcare,Medical Devices
+FANG,Diamondback Energy,Energy,Oil & Gas E&P
+DASH,DoorDash,Consumer Cyclical,Internet Retail
+EA,Electronic Arts,Communication Services,Electronic Gaming & Multimedia
+EXC,Exelon,Utilities,Utilities - Regulated Electric
+FAST,Fastenal,Industrials,Industrial Distribution
+FTNT,Fortinet,Technology,Software - Infrastructure
+GEHC,GE HealthCare,Healthcare,Health Information Services
+GILD,Gilead Sciences,Healthcare,Drug Manufacturers - General
+GFS,GlobalFoundries,Technology,Semiconductors
+HON,Honeywell,Industrials,Conglomerates
+IDXX,Idexx Laboratories,Healthcare,Diagnostics & Research
+INTC,Intel,Technology,Semiconductors
+INTU,Intuit,Technology,Software - Application
+ISRG,Intuitive Surgical,Healthcare,Medical Instruments & Supplies
+KDP,Keurig Dr Pepper,Consumer Defensive,Beverages - Non-Alcoholic
+KLAC,KLA Corporation,Technology,Semiconductor Equipment & Materials
+KHC,Kraft Heinz,Consumer Defensive,Packaged Foods
+LRCX,Lam Research,Technology,Semiconductor Equipment & Materials
+LIN,Linde plc,Basic Materials,Specialty Chemicals
+LULU,Lululemon,Consumer Cyclical,Apparel Retail
+MAR,Marriott International,Consumer Cyclical,Lodging
+MRVL,Marvell Technology,Technology,Semiconductors
+MELI,Mercado Libre,Consumer Cyclical,Internet Retail
+META,Meta Platforms,Communication Services,Internet Content & Information
+MCHP,Microchip Technology,Technology,Semiconductors
+MU,Micron Technology,Technology,Semiconductors
+MSFT,Microsoft,Technology,Software - Infrastructure
+MSTR,MicroStrategy,Technology,Software - Application
+MDLZ,Mondelez International,Consumer Defensive,Confectioners
+MNST,Monster Beverage,Consumer Defensive,Beverages - Non-Alcoholic
+NFLX,"Netflix, Inc.",Communication Services,Entertainment
+NVDA,Nvidia,Technology,Semiconductors
+NXPI,NXP Semiconductors,Technology,Semiconductors
+ORLY,O'Reilly Automotive,Consumer Cyclical,Auto Parts
+ODFL,Old Dominion Freight Line,Industrials,Trucking
+ON,Onsemi,Technology,Semiconductors
+PCAR,Paccar,Industrials,Farm & Heavy Construction Machinery
+PLTR,Palantir Technologies,Technology,Software - Infrastructure
+PANW,Palo Alto Networks,Technology,Software - Infrastructure
+PAYX,Paychex,Technology,Software - Application
+PYPL,PayPal,Financial Services,Credit Services
+PDD,PDD Holdings,Consumer Cyclical,Internet Retail
+PEP,PepsiCo,Consumer Defensive,Beverages - Non-Alcoholic
+QCOM,Qualcomm,Technology,Semiconductors
+REGN,Regeneron Pharmaceuticals,Healthcare,Biotechnology
+ROP,Roper Technologies,Technology,Software - Application
+ROST,Ross Stores,Consumer Cyclical,Apparel Retail
+SHOP,Shopify,Technology,Software - Application
+SBUX,Starbucks,Consumer Cyclical,Restaurants
+SNPS,Synopsys,Technology,Software - Infrastructure
+TMUS,T-Mobile US,Communication Services,Telecom Services
+TTWO,Take-Two Interactive,Communication Services,Electronic Gaming & Multimedia
+TSLA,"Tesla, Inc.",Consumer Cyclical,Auto Manufacturers
+TXN,Texas Instruments,Technology,Semiconductors
+TRI,Thomson Reuters,Industrials,Specialty Business Services
+TTD,Trade Desk (The),Communication Services,Advertising Agencies
+VRSK,Verisk Analytics,Industrials,Consulting Services
+VRTX,Vertex Pharmaceuticals,Healthcare,Biotechnology
+WBD,Warner Bros. Discovery,Communication Services,Entertainment
+WDAY,"Workday, Inc.",Technology,Software - Application
+XEL,Xcel Energy,Utilities,Utilities - Regulated Electric
+ZS,Zscaler,Technology,Software - Infrastructure
