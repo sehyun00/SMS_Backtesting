@@ -95,6 +95,7 @@ class HybridPortfolioEnv:
 
         info = {
             "portfolio_value": self.portfolio_value,
+            "return": net_return,
             "date": w["date"],
             "turnover": turnover,
             "cost": cost,

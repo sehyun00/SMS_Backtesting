@@ -208,6 +208,9 @@ class HybridDataset:
                 val = next_df[next_df["Symbol"] == symbol]["ReturnRaw"].values
                 labels.append(val[0] if len(val) > 0 else 0.0)
 
+            if i < 5:  # 처음 5개 윈도우만 출력
+                print(f"Window {i} ({target_date}): labels = {labels}")
+
             windows.append(
                 {
                     "features": np.array(features),
