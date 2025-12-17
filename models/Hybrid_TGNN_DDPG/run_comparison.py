@@ -307,13 +307,17 @@ def main(mode="compare"):
 
         train_windows = dataset.get_train_windows()
         train_env = HybridPortfolioEnv(dataset, windows=train_windows)
+
         train_hybrid(agent, train_env, num_episodes=200)
+        # train_hybrid(agent, train_env, num_episodes=2)  # 테스트용
 
         torch.save(agent.actor.state_dict(), model_path)
         print(f"✅ Model saved successfully: {model_path}")
         return
 
     elif mode == "compare":
+        print(f"\n🔍 Debug: model_path = {model_path}")
+        print(f"🔍 Debug: exists = {model_path.exists()}")
         if not model_path.exists():
             print(
                 "❌ No trained model found. Please run: python run_comparison.py train"
@@ -329,7 +333,33 @@ def main(mode="compare"):
 
         # Train된 가중치 로드 시도 (호환되는 부분만)
         print("⚠️  Warning: Train/Test 종목 수가 다릅니다. 전이 학습을 시도합니다...")
-        # TODO: 전이 학습 로직 구현 필요
+
+        # ✅ 전이 학습 로직 구현
+        trained_state_dict = torch.load(model_path, map_location=device)
+        model_state = test_agent.actor.state_dict()
+
+        # TGNN Encoder와 공통 레이어만 로드 (Output 레이어 제외)
+        loaded_keys = []
+        skipped_keys = []
+        for key in trained_state_dict.keys():
+            # Output 레이어와 종목 수 의존 레이어 제외
+            if "output" not in key and "weight_net" not in key:
+                if (
+                    key in model_state
+                    and trained_state_dict[key].shape == model_state[key].shape
+                ):
+                    model_state[key] = trained_state_dict[key]
+                    loaded_keys.append(key)
+                else:
+                    skipped_keys.append(key)
+            else:
+                skipped_keys.append(key)
+
+        test_agent.actor.load_state_dict(model_state)
+        test_agent.actor.eval()
+        print(
+            f"✅ Loaded {len(loaded_keys)} layers, skipped {len(skipped_keys)} layers (size mismatch)"
+        )
 
         print("[Testing] Performing backtesting on 2021-2025 data...")
 
