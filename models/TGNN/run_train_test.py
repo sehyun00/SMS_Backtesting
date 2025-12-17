@@ -158,12 +158,18 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
     colors = ["#2E86AB", "#A23B72", "#F18F01", "#C73E1D", "#6A994E"]
     labels = ["B&H", "Monthly", "Quarterly", "Semiannual", "Annual"]
 
-    # 1. 누적 수익률
+    
+    # ==========================================
+    # 1. 누적 수익률 그래프 (절댓값 사용)
+    # ==========================================
     all_returns = []
+
     for (name, data), color in zip(strategies.items(), colors):
         dates = pd.to_datetime(data["dates"])
         initial_value = data["portfolio_values"][0]
-        returns = [(v / initial_value - 1) * 100 for v in data["portfolio_values"]]
+        
+        returns = [abs((v / initial_value - 1) * 100) for v in data["portfolio_values"]]
+        
         all_returns.extend(returns)
         ax1.plot(dates, returns, label=name, linewidth=2.5, color=color)
 
@@ -172,11 +178,12 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
     ax1.set_xlabel("Year", fontsize=12, fontweight="bold")
     ax1.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
     ax1.xaxis.set_major_locator(mdates.YearLocator())
-    ax1.set_ylim(min(all_returns) - 10, max(all_returns) * 1.1)
+    
+    ax1.set_ylim(0, max(all_returns) * 1.1)
+    
     ax1.legend(loc="upper left", fontsize=10, frameon=True, framealpha=0.9, ncol=5)
     ax1.grid(True, which="major", alpha=0.3, linestyle="--")
-    ax1.axhline(y=0, color="black", linestyle="--", linewidth=1)
-
+    
     # 2. CAGR
     cagr_values = []
     for data in [buy_and_hold, monthly, quarterly, semiannual, annual]:
@@ -262,8 +269,8 @@ def main(mode="train"):
     
     MODEL_CONFIG = {
         "num_features": len(feature_cols),
-        "hidden_dims": [64, 64, 32],
-        "num_heads": 4,
+        "hidden_dims": [128, 128, 64],
+        "num_heads": 8,
     }
     
     # ========== 학습 모드 ==========
@@ -274,87 +281,123 @@ def main(mode="train"):
         
         # 학습 데이터 로드
         train_df = pd.read_csv(TRAIN_DATA_PATH)
+    
+        # 데이터 정제
+    print("\n🔧 데이터 정제 중...")
+    train_df = train_df.replace([np.inf, -np.inf], np.nan)
+    
+    for col in feature_cols:
+        if col in train_df.columns:
+            train_df[col] = train_df[col].fillna(0)
+            mean = train_df[col].mean()
+            std = train_df[col].std()
+            if std > 0:
+                train_df[col] = train_df[col].clip(mean - 10*std, mean + 10*std)
+    
+    train_df['Momentum1M'] = train_df['Momentum1M'].fillna(0).clip(-1.0, 1.0)
         
-        # ✅✅✅ 핵심: 데이터 정제 ✅✅✅
-        print("\n🔧 데이터 정제 중...")
+    print(f"✅ 데이터 정제 완료")
+    print(f"   총 행 수: {len(train_df)}")
+    print(f"   기간: {train_df['Date'].min()} ~ {train_df['Date'].max()}")
+    print(f"   종목 수: {train_df['Symbol'].nunique()}")
         
-        # 1. inf 값을 NaN으로 변환
-        train_df = train_df.replace([np.inf, -np.inf], np.nan)
+    # 데이터 통계 출력
+    print(f"\n📊 Feature 통계:")
+    for col in feature_cols[:5]:  # 처음 5개만 출력
+        if col in train_df.columns:
+            print(f"   {col}: mean={train_df[col].mean():.4f}, std={train_df[col].std():.4f}")
         
-        # 2. 각 feature별 NaN 처리 및 이상치 제거
-        for col in feature_cols:
-            if col in train_df.columns:
-                # NaN을 0으로 채우기
-                train_df[col] = train_df[col].fillna(0)
-                
-                # 극단값 클리핑 (±5 표준편차)
-                mean = train_df[col].mean()
-                std = train_df[col].std()
-                if std > 0:
-                    lower = mean - 5 * std
-                    upper = mean + 5 * std
-                    train_df[col] = train_df[col].clip(lower, upper)
+    # 학습 데이터셋 생성
+    train_dataset = TGNNDataset(
+        df=train_df,
+        window_size=6,
+        feature_cols=feature_cols,
+    )
         
-        # 3. Momentum1M (라벨) 특별 처리
-        if 'Momentum1M' in train_df.columns:
-            train_df['Momentum1M'] = train_df['Momentum1M'].fillna(0)
-            train_df['Momentum1M'] = train_df['Momentum1M'].clip(-50, 50)  # ±50% 제한
-        
-        print(f"✅ 데이터 정제 완료")
-        print(f"   총 행 수: {len(train_df)}")
-        print(f"   기간: {train_df['Date'].min()} ~ {train_df['Date'].max()}")
-        print(f"   종목 수: {train_df['Symbol'].nunique()}")
-        
-        # 데이터 통계 출력
-        print(f"\n📊 Feature 통계:")
-        for col in feature_cols[:5]:  # 처음 5개만 출력
-            if col in train_df.columns:
-                print(f"   {col}: mean={train_df[col].mean():.4f}, std={train_df[col].std():.4f}")
-        
-        # 학습 데이터셋 생성
-        train_dataset = TGNNDataset(
-            df=train_df,
-            window_size=12,
-            feature_cols=feature_cols,
-        )
-        
-        print(f"\n생성된 윈도우 수: {len(train_dataset)}")
+    print(f"\n생성된 윈도우 수: {len(train_dataset)}")
         
         # ✅ 데이터셋 샘플 확인
-        if len(train_dataset) > 0:
-            sample = train_dataset[0]
-            print(f"   샘플 features shape: {sample['features'].shape}")
-            print(f"   샘플 labels shape: {sample['labels'].shape}")
-            print(f"   샘플 labels 범위: [{sample['labels'].min():.2f}, {sample['labels'].max():.2f}]")
+    if len(train_dataset) > 0:
+        sample = train_dataset[0]
+        print(f"   샘플 features shape: {sample['features'].shape}")
+        print(f"   샘플 labels shape: {sample['labels'].shape}")
+        print(f"   샘플 labels 범위: [{sample['labels'].min():.2f}, {sample['labels'].max():.2f}]")
         
-        # Train/Val 분할 (80/20)
-        train_size = int(len(train_dataset) * 0.8)
-        val_size = len(train_dataset) - train_size
+    # Train/Val 분할 (80/20)
+    train_size = int(len(train_dataset) * 0.8)
+    val_size = len(train_dataset) - train_size
+    
+    train_data = torch.utils.data.Subset(train_dataset, range(train_size))
+    val_data = torch.utils.data.Subset(train_dataset, range(train_size, train_size + val_size))
         
-        train_data = torch.utils.data.Subset(train_dataset, range(train_size))
-        val_data = torch.utils.data.Subset(train_dataset, range(train_size, train_size + val_size))
+    train_loader = DataLoader(train_data, batch_size=16, shuffle=True, collate_fn=custom_collate)  # ✅ batch_size 감소
+    val_loader = DataLoader(val_data, batch_size=16, collate_fn=custom_collate)
         
-        train_loader = DataLoader(train_data, batch_size=16, shuffle=True, collate_fn=custom_collate)  # ✅ batch_size 감소
-        val_loader = DataLoader(val_data, batch_size=16, collate_fn=custom_collate)
+    # 모델 생성
+    num_stocks = train_df['Symbol'].nunique()
+    model = TGNNModel(
+        num_features=len(feature_cols),
+        hidden_dims=[64, 64, 32], 
+        num_heads=4,  
+        num_stocks=num_stocks,
+    )
         
-        # 모델 생성
-        num_stocks = train_df['Symbol'].nunique()
-        model = TGNNModel(
-            num_features=len(feature_cols),
-            hidden_dims=[64, 64, 32], 
-            num_heads=4,  
-            num_stocks=num_stocks,
-        )
+    print(f"\n🤖 모델 구조:")
+    print(f"   입력 특성 수: {len(feature_cols)}")
+    print(f"   히든 차원: [64, 64, 32]")
+    print(f"   어텐션 헤드: 4")
+    print(f"   종목 수: {num_stocks}")
         
-        print(f"\n🤖 모델 구조:")
-        print(f"   입력 특성 수: {len(feature_cols)}")
-        print(f"   히든 차원: [64, 64, 32]")
-        print(f"   어텐션 헤드: 4")
-        print(f"   종목 수: {num_stocks}")
+    # 학습 실행
+    train_model(model, train_loader, val_loader, num_epochs=300, lr=1e-5, save_path=str(model_path))
+    print(f"\n✅ 학습 완료! 모델 저장: {model_path}")
+
+    print("\n" + "=" * 60)
+    print("학습 데이터 예측 정확도 테스트")
+    print("=" * 60)
         
-        # 학습 실행
-        train_model(model, train_loader, val_loader, num_epochs=300, lr=1e-5, save_path=str(model_path))
-        print(f"\n✅ 학습 완료! 모델 저장: {model_path}")
+    model.eval()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+        
+    all_predictions = []
+    all_actuals = []
+        
+    with torch.no_grad():
+        for idx in range(min(50, len(train_dataset))):  # 처음 50개 윈도우
+            batch = train_dataset[idx]
+            features = batch["features"].unsqueeze(0).to(device)
+            adj = batch["adj_matrix"].unsqueeze(0).to(device)
+                
+            predictions, _ = model(features, adj)
+            pred = predictions.squeeze(0).cpu().numpy()
+            actual = batch["labels"].numpy()
+                
+            all_predictions.extend(pred)
+            all_actuals.extend(actual)
+        
+    all_predictions = np.array(all_predictions)
+    all_actuals = np.array(all_actuals)
+        
+    # 상관계수 계산
+    correlation = np.corrcoef(all_predictions, all_actuals)[0, 1]
+        
+        # MSE 계산
+    mse = np.mean((all_predictions - all_actuals) ** 2)
+        
+        # MAE 계산
+    mae = np.mean(np.abs(all_predictions - all_actuals))
+        
+    print(f"\n📊 예측 정확도:")
+    print(f"   상관계수 (Correlation): {correlation:.4f}")
+    print(f"   MSE: {mse:.6f}")
+    print(f"   MAE: {mae:.6f}")
+    print(f"\n   예측값 범위: [{all_predictions.min():.4f}, {all_predictions.max():.4f}]")
+    print(f"   실제값 범위: [{all_actuals.min():.4f}, {all_actuals.max():.4f}]")
+        
+    # 방향성 정확도 (부호가 일치하는 비율)
+    direction_correct = np.mean(np.sign(all_predictions) == np.sign(all_actuals))
+    print(f"   방향성 정확도: {direction_correct:.2%}")
     
 
     # ========== 테스트 모드 ==========

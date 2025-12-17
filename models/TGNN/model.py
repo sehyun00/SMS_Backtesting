@@ -173,8 +173,6 @@ class TGNNDataset(Dataset):
         self.feature_cols = feature_cols
         self.start_date = pd.to_datetime(start_date) if start_date else None
         self.end_date = pd.to_datetime(end_date) if end_date else None
-
-        # ✅ 정규화 제거 (run_train_test.py에서 이미 처리함)
         
         # 월별 리샘플링
         self.monthly_df = (
@@ -334,17 +332,21 @@ def train_model(
     train_loader: DataLoader,
     val_loader: DataLoader,
     num_epochs: int = 300,
-    lr: float = 1e-5,  # ✅ 기본값 낮춤
+    lr: float = 1e-5, 
     save_path: str = "best_tgnn.pth",
 ):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"🖥️  사용 디바이스: {device}")
+    
+    model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.MSELoss()
+    criterion = nn.HuberLoss(delta=0.1)
     
     # ✅ Gradient Clipping 값
     max_grad_norm = 0.5
 
     best_val_loss = float("inf")
-    patience = 20
+    patience = 30
     patience_counter = 0
 
     for epoch in range(num_epochs):
