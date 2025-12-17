@@ -121,14 +121,25 @@ SMS_Backtesting/
 - Action: 각 종목의 투자 비중 (Continuous Control)
 - Reward: **CRRA Utility Function** (위험 회피 및 거래비용 최적화)
 
-#### 3. Hybrid (TGNN+DDPG) 모델 ⭐ **(제안 방법)**
+#### 3. Hybrid (TGNN+DDPG) 모델 ⭐ **(Novelty)**
 
-**목적** : TGNN의 관계 추출과 DDPG의 동적 최적화 결합
+본 프로젝트의 **최종 제안 모델**입니다.
+- **구조**: TGNN을 State Encoder로 사용하여 종목 간 관계를 추출하고, 이를 DDPG Actor-Critic 네트워크에 입력합니다.
+- **성과**: 3년 학습 / 8년 테스트 결과 **CAGR 54.7%** 달성.
+- **특징**: 단순 수익 추구가 아닌, 시장의 구조적 위험(Structural Risk)을 인지하고 회피하는 지능형 에이전트.
 
-**핵심 메커니즘** :
-1. **Feature Extraction** : TGNN이 시장 데이터에서 종목 간 잠재 특징 (Latent Features) 추출
-2. **Policy Optimization** : DDPG가 추출된 특징을 State로 받아 최종 투자 비중 결정
-3. **End-to-End Learning** : 두 모델이 통합 손실 함수로 동시 학습
+---
+
+## 📊 백테스팅 결과 요약 (2018 ~ 2025)
+
+| 모델 (전략) | 연평균 수익률 (CAGR) | 최대 낙폭 (MDD) | 최종 자산 ($1M 투자 시) | 비고 |
+|:---:|:---:|:---:|:---:|:---:|
+| **TGNN (Top-5)** | 153.3% * | - | - | *기존 연구 결과* |
+| **DDPG (Only)** | 50.1% | 58.7% | $24.8M | 동적 자산 배분 |
+| **Hybrid (New)**| **54.7%** | **59.0%** | **$28.8M** | **최고 수익 달성** |
+| **Buy & Hold** | 35.4% | 34.6% | $11.3M | 벤치마크 |
+
+> **Note**: Hybrid 모델은 리스크(MDD)가 다소 높지만, 압도적인 수익률로 보상하는 'High Risk, High Return' 성향을 보입니다.
 
 ---
 
