@@ -9,7 +9,8 @@ import random
 
 # ==================== 1. TGNN Logic (State Encoder) ====================
 
-#ㅇㅇ
+
+# ㅇㅇ
 class GraphConvLayer(nn.Module):
     """
     Graph Convolutional Layer
@@ -69,13 +70,15 @@ class TemporalAttention(nn.Module):
 class TGNNEncoder(nn.Module):
     """
     Spatiotemporal Encoder
-    - Uses TGNN structure to extract spatial (inter-stock relationships) and temporal (time series) features.
-    - Structure: GCN Layers (spatial info) -> Temporal Attention (temporal info)
+    - Uses TGNN structure to extract spatial and temporal features.
     """
 
     def __init__(self, num_features, hidden_dims=[64, 64], num_heads=4):
         super().__init__()
         self.input_proj = nn.Linear(num_features, hidden_dims[0])
+
+        # 🔥 해결책 2: Batch Normalization 추가
+        self.input_norm = nn.BatchNorm1d(hidden_dims[0])
 
         # Stack multiple GCN layers
         self.gcn_layers = nn.ModuleList(
@@ -85,29 +88,40 @@ class TGNNEncoder(nn.Module):
             ]
         )
 
+        # 🔥 해결책 2: Dropout 추가
+        self.dropout = nn.Dropout(0.1)
+
         self.temporal_attn = TemporalAttention(hidden_dims[-1], num_heads)
         self.out_dim = hidden_dims[-1]
 
     def forward(self, features, adj):
-        # features: (Batch, N, T, F) - Batch, num_stocks, time (window), num_features
+        # features: (Batch, N, T, F)
         batch, N, T, F = features.shape
-
         gcn_outputs = []
+
         # Apply GCN for each time step (t)
         for t in range(T):
             x_t = features[:, :, t, :]  # (Batch, N, F)
             h = self.input_proj(x_t)
 
+            # 🔥 해결책 2: Batch Norm 적용
+            if batch > 1:  # Batch size > 1일 때만
+                h = h.permute(0, 2, 1)  # (B, N, D) → (B, D, N)
+                h = self.input_norm(h)
+                h = h.permute(0, 2, 1)  # (B, D, N) → (B, N, D)
+
             for gcn in self.gcn_layers:
                 h = gcn(h, adj)
+                h = self.dropout(h)  # 🔥 과적합 방지
 
             gcn_outputs.append(h)
 
         # Stack results along time axis: (Batch, T, N, D)
         temporal_features = torch.stack(gcn_outputs, dim=1)
 
-        # Apply temporal attention mechanism to generate final embedding -> (Batch, N, D)
+        # Apply temporal attention
         node_embeddings = self.temporal_attn(temporal_features)
+
         return node_embeddings
 
 
@@ -126,6 +140,11 @@ class HybridActor(nn.Module):
         # Constraint parameters
         self.MIN_WEIGHT = 0.05  # 5% minimum per stock
         self.MAX_WEIGHT = 0.20  # 20% maximum per stock
+
+        # 🔥 동적 제약을 위한 기본값 저장
+        self.BASE_MIN_WEIGHT = 0.05
+        self.BASE_MAX_WEIGHT = 0.20
+        self.current_mdd = 0.0
 
         # TGNN path
         self.tgnn_encoder = TGNNEncoder(num_features)
@@ -173,15 +192,26 @@ class HybridActor(nn.Module):
             nn.Sigmoid(),
         )
 
+        # 🔥 Weight 초기화 (Xavier)
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight, gain=0.01)  # gain 축소
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Conv2d):
+                nn.init.xavier_uniform_(m.weight, gain=0.01)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
     def _enforce_constraints(self, weights, max_iter=10):
         """
         🔥 Iterative Projection: Enforce constraints while maintaining sum=1
-        
+
         This method ensures:
         1. MIN_WEIGHT <= w_i <= MAX_WEIGHT for all stocks
         2. sum(w) = 1.0
         3. No bypass through normalization
-        
+
         Algorithm:
         - Iteratively adjust weights that violate constraints
         - Redistribute excess/deficit to feasible stocks
@@ -190,75 +220,81 @@ class HybridActor(nn.Module):
         MIN_W = self.MIN_WEIGHT
         MAX_W = self.MAX_WEIGHT
         eps = 1e-4  # Convergence tolerance
-        
+
         for iteration in range(max_iter):
             # Step 1: Clamp to [MIN_W, MAX_W]
             weights_clamped = torch.clamp(weights, MIN_W, MAX_W)
-            
+
             # Step 2: Check current sum
             current_sum = weights_clamped.sum(dim=-1, keepdim=True)
-            
+
             # Step 3: If sum is close to 1.0, we're done
             if torch.allclose(current_sum, torch.ones_like(current_sum), atol=eps):
                 weights = weights_clamped
                 break
-            
+
             # Step 4: Redistribute excess/deficit
             deficit = 1.0 - current_sum  # (Batch, 1)
-            
+
             # 🔥 Fixed: Use element-wise operations instead of scalar comparison
             # Check if we need to increase or decrease weights
-            need_increase = (deficit > 0)  # (Batch, 1) boolean tensor
-            
+            need_increase = deficit > 0  # (Batch, 1) boolean tensor
+
             # Find stocks that have room to adjust
             room_to_grow = MAX_W - weights_clamped  # (Batch, N)
             room_to_shrink = weights_clamped - MIN_W  # (Batch, N)
-            
+
             # For increasing: distribute to stocks with room to grow
             total_room_grow = room_to_grow.sum(dim=-1, keepdim=True)  # (Batch, 1)
             adjustment_grow = torch.where(
                 total_room_grow > eps,
                 deficit * (room_to_grow / (total_room_grow + 1e-8)),
-                deficit / self.num_stocks
+                deficit / self.num_stocks,
             )
-            
+
             # For decreasing: take from stocks with room to shrink
             total_room_shrink = room_to_shrink.sum(dim=-1, keepdim=True)  # (Batch, 1)
             adjustment_shrink = torch.where(
                 total_room_shrink > eps,
                 deficit * (room_to_shrink / (total_room_shrink + 1e-8)),
-                deficit / self.num_stocks
+                deficit / self.num_stocks,
             )
-            
+
             # Apply appropriate adjustment based on need_increase
-            adjustment = torch.where(
-                need_increase,
-                adjustment_grow,
-                adjustment_shrink
-            )
-            
+            adjustment = torch.where(need_increase, adjustment_grow, adjustment_shrink)
+
             weights = weights_clamped + adjustment
-        
+
         # Final safety: clamp and normalize
         weights = torch.clamp(weights, MIN_W, MAX_W)
         weights = weights / (weights.sum(dim=-1, keepdim=True) + 1e-8)
-        
+
         return weights
 
     def forward(self, state):
         batch = state.shape[0]
         feat_size = self.num_stocks * self.window_size * self.num_features
 
+        # MDD 기반 동적 제약 조정
+        if self.current_mdd > 0.15:
+            self.MAX_WEIGHT = 0.15
+            self.MIN_WEIGHT = 0.07
+            temperature = 8.0
+        elif self.current_mdd > 0.10:
+            self.MAX_WEIGHT = 0.18
+            self.MIN_WEIGHT = 0.06
+            temperature = 6.0
+        else:
+            self.MAX_WEIGHT = self.BASE_MAX_WEIGHT
+            self.MIN_WEIGHT = self.BASE_MIN_WEIGHT
+            temperature = 5.0
+
         features_flat = state[:, :feat_size]
         adj_flat = state[:, feat_size:]
-
         features = features_flat.reshape(
             batch, self.num_stocks, self.window_size, self.num_features
         )
         adj = adj_flat.reshape(batch, self.num_stocks, self.num_stocks)
-
-        # Temperature for softmax
-        temperature = 5.0
 
         # TGNN path
         tgnn_embeddings = self.tgnn_encoder(features, adj)
@@ -274,15 +310,12 @@ class HybridActor(nn.Module):
         # Ensemble
         ensemble_input = torch.cat([state, tgnn_weights, ddpg_weights], dim=-1)
         alpha_raw = self.ensemble_weight_net(ensemble_input)
-        
-        # Expanded range: Use full 0.0 ~ 1.0 range directly from the network output
-        # (ensemble_weight_net already includes Sigmoid)
-        alpha = alpha_raw
+
+        # 🔥 해결책 1: Alpha 범위 제한
+        alpha = torch.clamp(alpha_raw, min=0.2, max=0.8)
 
         # Final combination
         final_weights = alpha * tgnn_weights + (1 - alpha) * ddpg_weights
-
-        # 🔥 NEW: Use iterative projection instead of clamp+normalize
         final_weights = self._enforce_constraints(final_weights)
 
         return final_weights, alpha.squeeze(-1), tgnn_weights, ddpg_weights
@@ -415,20 +448,32 @@ class HybridAgent:
             num_stocks, window_size, num_features, num_stocks
         ).to(device)
 
-        # Initialize target networks (copy training networks)
+        # Initialize target networks
         self.actor_target = HybridActor(num_stocks, window_size, num_features).to(
             device
         )
         self.critic_target = HybridCritic(
             num_stocks, window_size, num_features, num_stocks
         ).to(device)
+
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.critic_target.load_state_dict(self.critic.state_dict())
 
-        # Set up optimizers
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=lr_actor)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr_critic)
+        # 🔥 해결책 3: Alpha Network 별도 학습률 (10배 느리게)
+        self.actor_optimizer = torch.optim.Adam(
+            [
+                {"params": self.actor.tgnn_encoder.parameters(), "lr": lr_actor},
+                {"params": self.actor.ddpg_encoder.parameters(), "lr": lr_actor},
+                {"params": self.actor.tgnn_head.parameters(), "lr": lr_actor},
+                {"params": self.actor.ddpg_head.parameters(), "lr": lr_actor},
+                {
+                    "params": self.actor.ensemble_weight_net.parameters(),
+                    "lr": lr_actor * 0.1,
+                },
+            ]
+        )
 
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr_critic)
         self.replay_buffer = ReplayBuffer()
 
     def select_action(self, state, noise_std=0.1):
@@ -450,65 +495,85 @@ class HybridAgent:
         return action, alpha_value  # also return alpha value
 
     def train(self, batch_size=64):
-        """Training method - with entropy regularization"""
+        """학습 메서드 (Gradient Clipping 추가)"""
         if len(self.replay_buffer) < batch_size:
             return
 
+        # 배치 샘플링
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(
             batch_size
         )
+
         states = torch.FloatTensor(states).to(self.device)
         actions = torch.FloatTensor(actions).to(self.device)
-        rewards = torch.FloatTensor(rewards).to(self.device)
+        rewards = torch.FloatTensor(rewards).unsqueeze(1).to(self.device)
         next_states = torch.FloatTensor(next_states).to(self.device)
-        dones = torch.FloatTensor(dones).to(self.device)
+        dones = torch.FloatTensor(dones).unsqueeze(1).to(self.device)
 
-        # ----------------------------
-        # 1. Update Critic Network
-        # ----------------------------
+        # 🔥 NaN 체크 및 제거
+        if torch.isnan(states).any() or torch.isinf(states).any():
+            print("⚠️  NaN/Inf detected in states, skipping batch")
+            return
+
+        if torch.isnan(rewards).any() or torch.isinf(rewards).any():
+            print("⚠️  NaN/Inf detected in rewards, skipping batch")
+            return
+
+        # ----------------------
+        # Critic 업데이트
+        # ----------------------
         with torch.no_grad():
-            next_actions, _, _, _ = self.actor_target(next_states)
-            target_q = rewards + (1 - dones) * self.gamma * self.critic_target(
-                next_states, next_actions
-            )
+            next_actions, _, _, _ = self.actor_target(next_states)  # 🔥 수정
+            target_q = self.critic_target(next_states, next_actions)  # 🔥 수정
+            target_q = rewards + (1 - dones) * self.gamma * target_q
 
         current_q = self.critic(states, actions)
-        critic_loss = F.mse_loss(current_q, target_q)
+
+        # 🔥 NaN 체크
+        if torch.isnan(current_q).any() or torch.isnan(target_q).any():
+            print("⚠️  NaN detected in Q-values, skipping batch")
+            return
+
+        critic_loss = nn.MSELoss()(current_q, target_q)
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 1.0)
+
+        # 🔥 Gradient Clipping
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=1.0)
+
         self.critic_optimizer.step()
 
-        # ----------------------------
-        # 2. Update Actor Network (with entropy)
-        # ----------------------------
-        predicted_actions, alpha, _, _ = self.actor(states)
-
-        # Basic Actor Loss (maximize Q-Value)
-        actor_loss = -self.critic(states, predicted_actions).mean()
-
-        # ⭐ Entropy regularization: encourage Alpha to stay near 0.5
-        # Prevent Alpha from going to extreme values (0 or 1)
-        alpha_entropy = -(
-            alpha * torch.log(alpha + 1e-8) + (1 - alpha) * torch.log(1 - alpha + 1e-8)
-        ).mean()
-
-        # Total Loss = Actor Loss - Entropy Bonus
-        total_actor_loss = actor_loss - self.entropy_coef * alpha_entropy
+        # ----------------------
+        # Actor 업데이트
+        # ----------------------
+        pred_actions, _, _, _ = self.actor(states)
+        actor_loss = -self.critic(states, pred_actions).mean()
 
         self.actor_optimizer.zero_grad()
-        total_actor_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
+        actor_loss.backward()
+
+        # 🔥 Gradient Clipping
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
+
         self.actor_optimizer.step()
 
-        # ----------------------------
-        # 3. Soft Update Target Networks
-        # ----------------------------
-        self._soft_update(self.actor, self.actor_target)
-        self._soft_update(self.critic, self.critic_target)
+        # ----------------------
+        # Target Network Soft Update
+        # ----------------------
+        for target_param, param in zip(
+            self.actor_target.parameters(), self.actor.parameters()
+        ):
+            target_param.data.copy_(
+                self.tau * param.data + (1 - self.tau) * target_param.data
+            )
 
-        return critic_loss.item(), actor_loss.item()
+        for target_param, param in zip(
+            self.critic_target.parameters(), self.critic.parameters()
+        ):
+            target_param.data.copy_(
+                self.tau * param.data + (1 - self.tau) * target_param.data
+            )
 
     def _soft_update(self, source, target):
         """Slowly update target network (Polyak Averaging)"""

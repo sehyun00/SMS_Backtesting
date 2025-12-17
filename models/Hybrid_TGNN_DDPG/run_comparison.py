@@ -1,45 +1,39 @@
-"""
-Hybrid TGNN-DDPG Training and Performance Comparison Script
-- Combines TGNN's graph generation logic with DDPG's reinforcement learning logic for training and testing.
-- Training Period: ~2017 (3 years)
-- Test Period: 2018~2025 (8 years)
-"""
-
 import numpy as np
 import pandas as pd
 import torch
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import warnings
 
 warnings.filterwarnings("ignore")
-
 from model import HybridAgent
 from visualization import BacktestVisualizer
 
-# Project root and data path settings
+# ==========================================
+# 프로젝트 루트 및 데이터 경로 설정
+# ==========================================
 ROOT_DIR = Path(__file__).parent.parent.parent
-
-# 🔥 Automatically select the most recent CSV file
 data_files = sorted(
     ROOT_DIR.glob("data/processed_daily_5factor_model_10stocks_*years_*.csv")
 )
-
 if not data_files:
     raise FileNotFoundError("Data file not found. Please run preprocessing first.")
-
-DATA_PATH = data_files[-1]  # Most recent file (last after sorting)
-print(f"📂 Using data file: {DATA_PATH.name}")
-
-
-# ============ Hybrid Dataset (Graph Structure + Window Data) ============
+DATA_PATH = data_files[-1]  # 가장 최근 파일
+print(f"📂 Using data file: {DATA_PATH.name}\n")
 
 
+# ==========================================
+# Hybrid Dataset (TGNN용 그래프 + 윈도우 데이터)
+# ==========================================
 class HybridDataset:
     """
-    Dataset class for Hybrid model
-    - Generates and provides time series window data and relationship graphs (Adjacency Matrix) between stocks.
+    Hybrid 모델용 Dataset 클래스
+    - 주식 간 관계 그래프(인접 행렬) 생성
+    - 시계열 윈도우 데이터 제공
     """
 
     def __init__(self, df, window_size=12, feature_cols=None):
@@ -49,28 +43,27 @@ class HybridDataset:
         self.feature_cols = feature_cols
         self.symbols = sorted(df["Symbol"].unique())
 
-        # 1. Convert to monthly data (Resampling)
-        # - Merge daily data based on month-end.
+        # 1. 일별 → 월말 변환
         self.monthly_df = (
             self.df.set_index("Date")
             .groupby(["Symbol", pd.Grouper(freq="ME")])
             .last()
             .reset_index()
         )
-        # Use Momentum1M as target return (can be replaced if needed)
-        self.monthly_df["Return_Raw"] = self.monthly_df["Momentum1M"].copy()
 
-        # 2. Train/Test data split date (December 31, 2017)
+        # 2. 타겟 수익률 (다음 달 모멘텀)
+        self.monthly_df["ReturnRaw"] = self.monthly_df["Momentum1M"].copy()
+
+        # 3. Train/Test 분할 날짜
         self.split_date = pd.Timestamp("2015-12-31")
 
-        # 3. Fit scaler (based on Train data)
-        # - Prevent information leakage (Look-ahead Bias) from Test data
-        self._fit_scaler_on_train_data()
+        # 4. 🔥 스케일링 (5-Factor 제외)
+        self.fit_scaler_on_train_data()
 
-        # 4. Create window data (including graphs)
-        self.windows = self._create_windows()
+        # 5. 윈도우 생성
+        self.windows = self.create_windows()
 
-        # 5. Find test start index
+        # 6. 테스트 시작 인덱스 찾기
         self.test_start_idx = 0
         for i, w in enumerate(self.windows):
             if w["date"] > self.split_date:
@@ -83,26 +76,41 @@ class HybridDataset:
             f"   📉 Test data: {len(self.windows) - self.test_start_idx} months (2018~)"
         )
 
-    def _fit_scaler_on_train_data(self):
-        """Fit StandardScaler only on training data."""
+    def fit_scaler_on_train_data(self):
+        """🔥 학습 데이터로만 StandardScaler 피팅 (5-Factor 제외)"""
         train_data = self.monthly_df[self.monthly_df["Date"] <= self.split_date]
-        self.scaler = StandardScaler()
-        self.scaler.fit(train_data[self.feature_cols].values)
 
-        # Transform all data
-        self.monthly_df[self.feature_cols] = self.scaler.transform(
-            self.monthly_df[self.feature_cols].values
+        # 🔥 5-Factor 제외 (이미 % 단위)
+        scale_cols = [
+            col
+            for col in self.feature_cols
+            if col not in ["Mkt_RF", "SMB", "HML", "RMW", "CMA"]
+        ]
+
+        if not scale_cols:
+            print("⚠️  No columns to scale!")
+            return
+
+        self.scaler = StandardScaler()
+        self.scaler.fit(train_data[scale_cols].values)
+
+        # 스케일링 적용 (5-Factor 제외)
+        self.monthly_df[scale_cols] = self.scaler.transform(
+            self.monthly_df[scale_cols].values
         )
 
-    def _create_graph(self, snapshot_df):
+        print(
+            f"   ✅ StandardScaler fitted on {len(scale_cols)} columns (5-Factor raw)"
+        )
+
+    def create_graph(self, snapshot_df):
         """
-        TGNN logic: Correlation * Industry Similarity
-        - Define relationships between two stocks to generate adjacency matrix.
+        TGNN 로직: 상관관계 + 산업 유사도 기반 인접 행렬 생성
         """
         n = len(self.symbols)
         corr_matrix = np.eye(n)
 
-        # 1. Calculate correlation coefficient
+        # 1. 상관계수 계산
         for i, sym1 in enumerate(self.symbols):
             data1 = snapshot_df[snapshot_df["Symbol"] == sym1][
                 self.feature_cols
@@ -113,13 +121,12 @@ class HybridDataset:
                 data2 = snapshot_df[snapshot_df["Symbol"] == sym2][
                     self.feature_cols
                 ].values.flatten()
-
                 if len(data1) > 0 and len(data2) > 0:
                     corr = np.corrcoef(data1, data2)[0, 1]
                     corr_matrix[i, j] = corr
                     corr_matrix[j, i] = corr
 
-        # 2. Reflect industry similarity
+        # 2. 산업 유사도 반영
         if "Sector" in snapshot_df.columns:
             sector_map = snapshot_df.set_index("Symbol")["Sector"].to_dict()
             industry_sim = np.zeros((n, n))
@@ -129,37 +136,34 @@ class HybridDataset:
                         industry_sim[i, j] = (
                             1.0 if sector_map[sym1] == sector_map[sym2] else 0.5
                         )
-
-            edge_weights = corr_matrix * industry_sim
+            edge_weights = corr_matrix + industry_sim
         else:
             edge_weights = corr_matrix
 
-        # Keep only connections above threshold (0.35) (Binary Adjacency Matrix)
-        adj = (edge_weights >= 0.35).astype(float)
+        # 3. 임계값 이상만 연결
+        adj = (edge_weights > 0.35).astype(float)
         return adj
 
-    def _create_masked_graph(self, snapshot_df, active_mask):
-        """Generate graph with removed connections for non-existent stocks (pre-listing/delisted, etc.)."""
+    def create_masked_graph(self, snapshot_df, active_mask):
+        """비활성 종목의 연결 제거"""
         n = len(self.symbols)
         adj = (
-            self._create_graph(snapshot_df)
+            self.create_graph(snapshot_df)
             if not snapshot_df.empty
             else np.zeros((n, n))
         )
-
-        # Remove connections of inactive stocks using mask matrix
         mask_matrix = np.outer(active_mask, active_mask)
         return adj * mask_matrix
 
-    def _create_windows(self):
-        """Generate window data for the entire period."""
+    def create_windows(self):
+        """전체 기간의 윈도우 데이터 생성"""
         dates = sorted(self.monthly_df["Date"].unique())
         windows = []
 
         for i in range(len(dates) - self.window_size):
             window_dates = dates[i : i + self.window_size]
-            target_date = window_dates[-1]  # Current time point (portfolio composition time)
-            next_date = dates[i + self.window_size]  # Next time point (return check time)
+            target_date = window_dates[-1]
+            next_date = dates[i + self.window_size]
 
             window_df = self.monthly_df[self.monthly_df["Date"].isin(window_dates)]
             next_df = self.monthly_df[self.monthly_df["Date"] == next_date]
@@ -169,12 +173,10 @@ class HybridDataset:
 
             for symbol in self.symbols:
                 stock_data = window_df[window_df["Symbol"] == symbol]
-                # Check if stock data exists at current time point
                 is_active = not stock_data[stock_data["Date"] == target_date].empty
 
                 if is_active:
                     vals = stock_data[self.feature_cols].values
-                    # Pad with zeros if data length is insufficient (early listing, etc.)
                     if len(vals) < self.window_size:
                         pad = np.zeros(
                             (self.window_size - len(vals), len(self.feature_cols))
@@ -183,44 +185,45 @@ class HybridDataset:
                     features.append(vals)
                     active_mask.append(True)
                 else:
-                    # Fill inactive stocks with zeros
                     features.append(
                         np.zeros((self.window_size, len(self.feature_cols)))
                     )
                     active_mask.append(False)
 
-            # Build graph (apply Mask)
             active_mask = np.array(active_mask)
-            adj = self._create_masked_graph(
+            adj = self.create_masked_graph(
                 window_df[window_df["Date"] == target_date], active_mask
             )
 
-            # Labels (next month's returns)
             labels = []
             for symbol in self.symbols:
-                val = next_df[next_df["Symbol"] == symbol]["Return_Raw"].values
+                val = next_df[next_df["Symbol"] == symbol]["ReturnRaw"].values
                 labels.append(val[0] if len(val) > 0 else 0.0)
 
             windows.append(
                 {
-                    "features": np.array(features),  # (N, T, F)
-                    "adj_matrix": adj,  # (N, N)
-                    "labels": np.array(labels),  # (N,)
+                    "features": np.array(features),
+                    "adjmatrix": adj,
+                    "labels": np.array(labels),
                     "date": target_date,
-                    "active_mask": active_mask,
+                    "activemask": active_mask,
                 }
             )
 
         return windows
 
     def get_state(self, idx):
-        """Return state vector to be used as input for RL agent."""
+        """RL 에이전트 입력용 상태 벡터 반환"""
         w = self.windows[idx]
-        features = w["features"]  # (N, T, F)
-        adj = w["adj_matrix"]  # (N, N)
+        features = w["features"]
+        adj = w["adjmatrix"]
 
-        # Flatten and combine: [feature vector..., adjacency matrix vector...]
+        # 🔥 NaN 제거
+        features = np.nan_to_num(features, nan=0.0, posinf=1.0, neginf=-1.0)
+        adj = np.nan_to_num(adj, nan=0.0, posinf=1.0, neginf=0.0)
+
         state = np.concatenate([features.flatten(), adj.flatten()])
+        state = np.nan_to_num(state, nan=0.0, posinf=10.0, neginf=-10.0)
         return state.astype(np.float32)
 
     def get_train_windows(self):
@@ -233,13 +236,11 @@ class HybridDataset:
         return len(self.windows)
 
 
-# ============ Portfolio Environment ============
-
+# ==========================================
+# Hybrid Portfolio Environment
+# ==========================================
 class HybridPortfolioEnv:
-    """
-    Reinforcement Learning Environment
-    - Defines State, Action, Reward interactions.
-    """
+    """강화학습 환경"""
 
     def __init__(self, dataset, windows=None, initial_cash=1_000_000):
         self.dataset = dataset
@@ -248,144 +249,221 @@ class HybridPortfolioEnv:
         self.portfolio_value = initial_cash
         self.current_step = 0
         self.n_steps = len(self.windows)
-        self.gamma = 2.0  # Risk Aversion
-        self.cost_bps = 0.0005  # Transaction cost (5bp)
-
+        self.gamma = 2.0
+        self.cost_bps = 0.0005
         self.n_stocks = len(dataset.symbols)
         self.prev_weights = np.zeros(self.n_stocks)
-
-        # Return history for Sharpe Ratio calculation
         self.return_history = []
 
     def reset(self):
-        """Initialize environment"""
         self.current_step = 0
         self.portfolio_value = self.initial_cash
         self.prev_weights = np.zeros(self.n_stocks)
-        self.return_history = []  # Initialize return history
-        return self._get_state(0)
+        self.return_history = []
+        return self.get_state(0)
 
-    def _get_state(self, idx):
-        """Generate state vector for current step"""
+    def get_state(self, idx):
         w = self.windows[idx]
         features = w["features"]
-        adj = w["adj_matrix"]
+        adj = w["adjmatrix"]
         state = np.concatenate([features.flatten(), adj.flatten()])
         return state.astype(np.float32)
 
     def step(self, action):
         w = self.windows[self.current_step]
-        returns = w["labels"]
+        returns = w["labels"]  # 이미 % 단위 (Momentum1M)
+        features = w["features"]
 
-        # 1. 포트폴리오 수익률 계산
-        portfolio_return_pct = np.dot(action, returns)
-        portfolio_return = portfolio_return_pct / 100.0
+        # 🔥 수정: *100 제거
+        portfolio_return_pct = np.dot(action, returns)  # % 단위
+        portfolio_return = portfolio_return_pct  # 🔥 그대로 사용!
 
-        # 2. 회전율(Turnover) 계산 및 비용 반영
+        # 거래 비용
         turnover = np.sum(np.abs(action - self.prev_weights))
-        cost = turnover * self.cost_bps
+        cost = turnover * self.cost_bps * 100  # bp → % 변환
+
         net_return = portfolio_return - cost
 
-        self.portfolio_value *= 1 + net_return
+        # 🔥 % → 비율 변환 (포트폴리오 가치 계산용)
+        self.portfolio_value *= 1 + net_return / 100
+
         self.current_step += 1
         done = self.current_step >= self.n_steps
+        self.return_history.append(net_return)  # % 단위로 저장
 
-        self.return_history.append(net_return)
+        # MDD 계산
+        if len(self.return_history) >= 12:
+            cumulative_returns = np.cumprod(
+                1 + np.array(self.return_history[-12:]) / 100
+            )
+            peak = np.maximum.accumulate(cumulative_returns)
+            drawdowns = (cumulative_returns - peak) / peak
+            self.current_mdd = abs(min(drawdowns))
+        else:
+            self.current_mdd = 0.0
 
-        # ----------------------------------------------------------------------
-        # Reward Calculation
-        # ----------------------------------------------------------------------
+        # 리워드 계산
         if len(self.return_history) >= 6:
-            returns_array = np.array(self.return_history[-12:])
+            returns_array = np.array(self.return_history[-12:])  # % 단위
             mean_return = np.mean(returns_array)
 
             negative_returns = returns_array[returns_array < 0]
             downside_std = (
                 np.std(negative_returns) if len(negative_returns) > 0 else 0.0
             )
-
-            concentration = np.sum(action**2)  # HHI
+            concentration = np.sum(action**2)
             volatility = np.std(returns_array)
 
-            # 1. Return component
-            return_reward = mean_return * 50
+            # 5-Factor (정상)
+            mkt_rf = features[:, -1, 13] * 100
+            smb = features[:, -1, 14] * 100
+            hml = features[:, -1, 15] * 100
+            rmw = features[:, -1, 16] * 100
+            cma = features[:, -1, 17] * 100
 
-            # 2. Risk adjustment (Sharpe-like)
+            mkt_rf = np.nan_to_num(mkt_rf, nan=0.0, posinf=10.0, neginf=-10.0)
+            smb = np.nan_to_num(smb, nan=0.0, posinf=10.0, neginf=-10.0)
+            hml = np.nan_to_num(hml, nan=0.0, posinf=10.0, neginf=-10.0)
+            rmw = np.nan_to_num(rmw, nan=0.0, posinf=10.0, neginf=-10.0)
+            cma = np.nan_to_num(cma, nan=0.0, posinf=10.0, neginf=-10.0)
+
+            # 기존 리워드 (스케일 조정)
+            return_reward = mean_return * 5.0  # 50 → 5
             risk_adjusted_return = mean_return / (volatility + 1e-8)
-            sharpe_bonus = risk_adjusted_return * 30.0
+            sharpe_bonus = risk_adjusted_return * 3.0  # 30 → 3
+            downside_penalty = 5.0 * downside_std  # 50 → 5
 
-            # 3. Downside risk
-            downside_penalty = 50.0 * downside_std
-
-            # 4. MDD penalty
+            # MDD Penalty
             if len(self.return_history) >= 12:
-                cumulative_returns = np.cumprod(1 + np.array(self.return_history[-12:]))
+                cumulative_returns = np.cumprod(
+                    1 + np.array(self.return_history[-12:]) / 100
+                )
                 peak = np.maximum.accumulate(cumulative_returns)
                 drawdowns = (cumulative_returns - peak) / peak
                 current_mdd = abs(min(drawdowns))
 
                 if current_mdd > 0.25:
-                    mdd_penalty = 1200.0 * (current_mdd - 0.25) ** 2
+                    mdd_penalty = 300.0 * (current_mdd - 0.25) ** 2
                 elif current_mdd > 0.20:
-                    mdd_penalty = 600.0 * (current_mdd - 0.20) ** 2
+                    mdd_penalty = 150.0 * (current_mdd - 0.20) ** 2
                 elif current_mdd > 0.15:
-                    mdd_penalty = 200.0 * (current_mdd - 0.15) ** 2
+                    mdd_penalty = 50.0 * (current_mdd - 0.15) ** 2
                 else:
                     mdd_penalty = 0
+
+                current_value = cumulative_returns[-1]
+                current_peak = np.max(cumulative_returns)
+                if current_value < current_peak:
+                    recovery_ratio = current_value / current_peak
+                    if recovery_ratio > 0.95:
+                        recovery_bonus = 15.0 * (1 - recovery_ratio)
+                    else:
+                        recovery_bonus = 0
+                else:
+                    mdd_penalty = 0
+                    recovery_bonus = 0
             else:
                 mdd_penalty = 0
+                recovery_bonus = 0
 
-            # 5. Volatility penalty
-            if volatility > 0.05:
-                volatility_penalty = 150.0 * (volatility - 0.05) ** 2
-            elif volatility > 0.035:
-                volatility_penalty = 50.0 * (volatility - 0.035) ** 2
+            # Volatility Penalty
+            if volatility > 5.0:
+                volatility_penalty = 15.0 * (volatility - 5.0) ** 2
+            elif volatility > 3.5:
+                volatility_penalty = 5.0 * (volatility - 3.5) ** 2
             else:
                 volatility_penalty = 0
 
-            # 6. Concentration penalty (HHI)
+            # Concentration Penalty
             if concentration > 0.12:
-                concentration_penalty = 5000.0 * (concentration - 0.12) ** 4
+                concentration_penalty = 500.0 * (concentration - 0.12) ** 4
             else:
                 concentration_penalty = 0
 
-            # 7. Diversity bonus
+            # Diversity Bonus
             entropy = -np.sum(action * np.log(action + 1e-10))
             max_entropy = np.log(len(action))
             normalized_entropy = entropy / max_entropy
 
             if normalized_entropy > 0.85:
-                diversity_bonus = 60.0 * normalized_entropy
+                diversity_bonus = 6.0 * normalized_entropy
             elif normalized_entropy > 0.75:
-                diversity_bonus = 40.0 * normalized_entropy
+                diversity_bonus = 4.0 * normalized_entropy
             else:
-                diversity_bonus = 20.0 * normalized_entropy
+                diversity_bonus = 2.0 * normalized_entropy
 
-            # 8. Turnover Penalty (회전율 페널티)
-            turnover_penalty = turnover * 20.0
+            # Turnover Penalty
+            recent_return = (
+                np.mean(self.return_history[-3:])
+                if len(self.return_history) >= 3
+                else 0
+            )
 
-            # 🔥 Final Reward
+            if recent_return < -3.0:
+                turnover_penalty = turnover * 1.0
+            elif recent_return > 5.0:
+                turnover_penalty = turnover * 1.0
+            else:
+                turnover_penalty = turnover * 2.5
+
+            # 5-Factor 리워드
+            market_exposure = np.dot(action, mkt_rf)
+            market_exposure = np.clip(market_exposure, -10, 10)
+            market_bonus = 0.4 * np.maximum(market_exposure, 0)
+
+            value_exposure = np.dot(action, hml)
+            value_exposure = np.clip(value_exposure, -10, 10)
+            value_bonus = 0.35 * np.maximum(value_exposure, 0)
+
+            quality_exposure = np.dot(action, rmw)
+            quality_exposure = np.clip(quality_exposure, -10, 10)
+            quality_bonus = 0.35 * np.maximum(quality_exposure, 0)
+
+            factor_exposures = np.array(
+                [
+                    np.dot(action, smb),
+                    np.dot(action, hml),
+                    np.dot(action, rmw),
+                    np.dot(action, cma),
+                ]
+            )
+            factor_exposures = np.nan_to_num(factor_exposures, nan=0.0)
+            factor_std = np.std(factor_exposures)
+
+            if factor_std < 0.2:
+                factor_diversity_bonus = 0.25 * (0.2 - factor_std)
+            else:
+                factor_diversity_bonus = 0
+
+            # Final Reward
             reward = (
                 return_reward
                 + sharpe_bonus
                 - downside_penalty
+                + market_bonus
+                + value_bonus
+                + quality_bonus
+                + factor_diversity_bonus
                 - mdd_penalty
                 - volatility_penalty
                 - concentration_penalty
                 + diversity_bonus
                 - turnover_penalty
+                + recovery_bonus
             )
 
+            # NaN 체크
+            if np.isnan(reward) or np.isinf(reward):
+                reward = net_return * 10 - turnover * 5.0
         else:
-            # 초기 단계 보상 (회전율 페널티 약하게 적용)
-            reward = (net_return * 100) - (turnover * 5.0)
+            reward = net_return * 10 - turnover * 5.0
 
         self.prev_weights = action
-        
+
         next_state = (
-            self._get_state(self.current_step)
+            self.get_state(self.current_step)
             if not done
-            else np.zeros_like(self._get_state(0))
+            else np.zeros_like(self.get_state(0))
         )
 
         info = {
@@ -395,36 +473,32 @@ class HybridPortfolioEnv:
             "cost": cost,
             "concentration": np.sum(action**2),
             "downside_risk": downside_std if len(self.return_history) >= 6 else 0,
+            "current_mdd": self.current_mdd,
         }
 
         return next_state, reward, done, info
 
 
-
-# ============ Training and Execution Logic ============
-
-
-def train_hybrid(agent, env, num_episodes=100):
-    """Hybrid agent training loop"""
-    print(f"\n🚀 Starting Hybrid model training: Total {num_episodes} episodes")
+# ==========================================
+# 학습 및 백테스팅 로직
+# ==========================================
+def train_hybrid(agent, env, num_episodes=200):
+    """Hybrid 에이전트 학습 루프"""
+    print(f"🚀 Starting Hybrid model training: Total {num_episodes} episodes")
 
     for episode in range(num_episodes):
         state = env.reset()
         episode_reward = 0
-
-        # Exploration noise reduction (Exploration scheduling)
         noise_std = max(0.01, 0.2 - episode * 0.002)
 
         while True:
-            # Action selection and environment interaction
-            action, alpha_value = agent.select_action(state, noise_std)  # Tuple unpacking
-            next_state, reward, done, info = env.step(action)  # Pass action only
+            action, alpha_value = agent.select_action(state, noise_std=noise_std)
+            next_state, reward, done, info = env.step(action)
 
-            # Store experience
+            agent.actor.current_mdd = info.get("current_mdd", 0.0)
             agent.replay_buffer.push(state, action, reward, next_state, done)
 
-            # Training (batch size 64)
-            if len(agent.replay_buffer) > 256:
+            if len(agent.replay_buffer) >= 256:
                 agent.train(batch_size=64)
 
             episode_reward += reward
@@ -435,26 +509,21 @@ def train_hybrid(agent, env, num_episodes=100):
 
         if (episode + 1) % 10 == 0:
             print(
-                f"[{episode + 1:3d}/{num_episodes}] Reward: {episode_reward:.2f}, Noise: {noise_std:.3f}, Alpha: {alpha_value:.3f}"
+                f"{episode + 1:3d}/{num_episodes} | Reward: {episode_reward:7.2f} | Noise: {noise_std:.3f} | Alpha: {alpha_value:.3f}"
             )
 
 
 def calculate_metrics(ts_data, dates, strategy_name):
-    """Calculate performance metrics (CAGR, MDD, Sharpe Ratio)"""
+    """성과 지표 계산"""
     df = pd.DataFrame(ts_data)
     df["date"] = pd.to_datetime(dates)
-
     initial = df["portfolio_value"].iloc[0]
     final = df["portfolio_value"].iloc[-1]
-
     days = (df["date"].max() - df["date"].min()).days
     years = days / 365.25
     cagr = ((final / initial) ** (1 / years) - 1) * 100 if years > 0 else 0
-
     mdd = abs(min(df["drawdown"])) * 100
-
-    # Sharpe Ratio (annualized)
-    r = df["return"] / 100
+    r = df["return"] * 100
     vol = r.std() * np.sqrt(12)
     sharpe = (cagr / 100) / (vol + 1e-8)
 
@@ -463,21 +532,21 @@ def calculate_metrics(ts_data, dates, strategy_name):
         "CAGR": cagr,
         "MDD": mdd,
         "Sharpe": sharpe,
-        "Final_Value": final,
+        "FinalValue": final,
     }
 
 
 def run_hybrid_rebalancing(agent, dataset, freq="monthly"):
-    """Execute rebalancing (reflecting select_action return value change)"""
+    """Hybrid 리밸런싱 백테스트"""
     freq_map = {"monthly": 1, "quarterly": 3, "semiannual": 6, "annual": 12}
     interval = freq_map[freq]
-
     test_windows = dataset.get_test_windows()
     start_idx = dataset.test_start_idx
 
     capital = 1_000_000
     peak = capital
     current_weights = np.ones(10) / 10
+    portfolio_history = [capital]
 
     ts_data = {
         "portfolio_value": [],
@@ -492,14 +561,25 @@ def run_hybrid_rebalancing(agent, dataset, freq="monthly"):
     for i, w in enumerate(test_windows):
         state = dataset.get_state(start_idx + i)
 
+        # MDD 업데이트
+        if len(portfolio_history) >= 12:
+            recent_values = np.array(portfolio_history[-12:])
+            peak_value = np.maximum.accumulate(recent_values)
+            drawdowns = (recent_values - peak_value) / peak_value
+            current_mdd = abs(min(drawdowns))
+        else:
+            current_mdd = 0.0
+
+        agent.actor.current_mdd = current_mdd
+
+        # 리밸런싱
         if i % interval == 0:
-            # select_action returns (action, alpha) tuple
             action, alpha_value = agent.select_action(state, noise_std=0.0)
             current_weights = action
 
             log = {
                 "Date": w["date"],
-                "Strategy": f"Hybrid({freq})",
+                "Strategy": f"Hybrid_{freq}",
                 "Type": "Rebalance",
                 "Alpha": round(alpha_value, 3),
             }
@@ -507,10 +587,10 @@ def run_hybrid_rebalancing(agent, dataset, freq="monthly"):
                 log[sym] = round(float(val), 4)
             trade_logs.append(log)
         else:
-            alpha_value = 0.5  # Default value on Hold
+            alpha_value = 0.5
             log = {
                 "Date": w["date"],
-                "Strategy": f"Hybrid({freq})",
+                "Strategy": f"Hybrid_{freq}",
                 "Type": "Hold",
                 "Alpha": round(alpha_value, 3),
             }
@@ -518,9 +598,10 @@ def run_hybrid_rebalancing(agent, dataset, freq="monthly"):
                 log[sym] = round(float(val), 4)
             trade_logs.append(log)
 
+        # 수익률 계산
         ret = np.dot(current_weights, w["labels"])
         capital *= 1 + ret / 100
-
+        portfolio_history.append(capital)
         peak = max(peak, capital)
         dd = (capital - peak) / peak
 
@@ -529,35 +610,36 @@ def run_hybrid_rebalancing(agent, dataset, freq="monthly"):
         ts_data["return"].append(ret)
         ts_data["drawdown"].append(dd)
         ts_data["turnover"].append(0)
-        ts_data["alpha"].append(alpha_value)  # Add Alpha recording
+        ts_data["alpha"].append(alpha_value)
 
-    metrics = calculate_metrics(ts_data, dates, f"Hybrid({freq})")
+    metrics = calculate_metrics(ts_data, dates, f"Hybrid_{freq}")
 
     return {
         "dates": dates,
         "portfolio_values": ts_data["portfolio_value"],
-        "alphas": ts_data["alpha"],  # Alpha history for analysis
+        "alphas": ts_data["alpha"],
         "metrics": metrics,
         "trade_logs": trade_logs,
     }
 
 
 def run_fixed_weights(dataset, strategy_name="1/N Buy & Hold"):
-    """
-    Benchmark: Fixed weight strategy (assuming Monthly Rebalancing)
-    """
+    """고정 비중 전략"""
     test_windows = dataset.get_test_windows()
-
     capital = 1_000_000
     peak = capital
     num_stocks = len(dataset.symbols)
 
-    ts_data = {"portfolio_value": [], "return": [], "drawdown": [], "turnover": []}
+    ts_data = {
+        "portfolio_value": [],
+        "return": [],
+        "drawdown": [],
+        "turnover": [],
+    }
     dates = []
     trade_logs = []
 
     for i, w in enumerate(test_windows):
-        # Assume rebalancing to 1/N every month (standard benchmark)
         current_weights = np.ones(num_stocks) / num_stocks
 
         if i == 0:
@@ -568,7 +650,6 @@ def run_fixed_weights(dataset, strategy_name="1/N Buy & Hold"):
 
         ret = np.dot(current_weights, w["labels"])
         capital *= 1 + ret / 100
-
         peak = max(peak, capital)
         dd = (capital - peak) / peak
 
@@ -579,6 +660,7 @@ def run_fixed_weights(dataset, strategy_name="1/N Buy & Hold"):
         ts_data["turnover"].append(0)
 
     metrics = calculate_metrics(ts_data, dates, strategy_name)
+
     return {
         "dates": dates,
         "portfolio_values": ts_data["portfolio_value"],
@@ -587,112 +669,115 @@ def run_fixed_weights(dataset, strategy_name="1/N Buy & Hold"):
     }
 
 
+# ==========================================
+# Main 함수
+# ==========================================
 def main(mode="compare"):
     df = pd.read_csv(DATA_PATH)
+
+    # Feature Columns (5-Factor 포함)
     feature_cols = [
-        # 🔥 Original indicators (dynamically changing)
-        "Close",  # Stock price
-        "Volume",  # Trading volume
+        "Close",
+        "Volume",
         "Beta",
         "MarketCap",
-        # 🔥 Momentum (rate of change)
         "Momentum1M",
         "Momentum3M",
         "Momentum6M",
         "Momentum12M",
-        # 🔥 Technical indicators (dynamic)
         "Volatility",
         "RSI",
         "MACD",
         "Signal",
         "MACD_Hist",
+        "Mkt_RF",
+        "SMB",
+        "HML",
+        "RMW",
+        "CMA",
     ]
 
-    print("\n[Initialization] Preparing Hybrid dataset...")
+    print("[Initialization] Preparing Hybrid dataset...")
     dataset = HybridDataset(df, feature_cols=feature_cols)
 
     num_stocks = 10
     window_size = 12
     num_features = len(feature_cols)
 
-    # Automatic GPU detection
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\n[System] Using device: {device}")
 
     agent = HybridAgent(num_stocks, window_size, num_features, device=device)
-
     model_path = Path(__file__).parent / "best_hybrid.pth"
 
     if mode == "train":
         print("\n[Training] Starting model training using 2010-2015 data...")
         if model_path.exists():
-            print("⚠️ Existing model found. Deleting and retraining...")
+            print("⚠️  Existing model found. Deleting and retraining...")
             model_path.unlink()
 
         train_windows = dataset.get_train_windows()
         train_env = HybridPortfolioEnv(dataset, windows=train_windows)
+        train_hybrid(agent, train_env, num_episodes=200)
 
-        # Actual training
-        train_hybrid(agent, train_env, num_episodes=100)
-
-        # Save Actor model
         torch.save(agent.actor.state_dict(), model_path)
-        print("✅ Model saved successfully ({})".format(model_path))
+        print(f"✅ Model saved successfully: {model_path}")
         return
 
     elif mode == "compare":
         if not model_path.exists():
             print(
-                "⚠️ No trained model found. Please run 'python run_comparison.py train' first."
+                "❌ No trained model found. Please run: python run_comparison.py train"
             )
             return
 
         print("\n[Testing] Loading saved model...")
         agent.actor.load_state_dict(torch.load(model_path))
+        print("[Testing] Performing backtesting on 2018-2025 data...")
 
-        print("\n[Testing] Performing backtesting on 2018-2025 data...")
-
-        # Execute backtesting by strategy
+        # 벤치마크
         buy_and_hold = run_fixed_weights(dataset, "1/N Buy & Hold")
+
+        # Hybrid 전략
         monthly = run_hybrid_rebalancing(agent, dataset, "monthly")
         quarterly = run_hybrid_rebalancing(agent, dataset, "quarterly")
         semiannual = run_hybrid_rebalancing(agent, dataset, "semiannual")
         annual = run_hybrid_rebalancing(agent, dataset, "annual")
 
-        # Result save path
+        # 시각화
         save_dir = ROOT_DIR / "results" / "03_Hybrid_TGNN_DDPG"
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        # Visualize results
         visualizer = BacktestVisualizer(save_dir=save_dir)
         visualizer.plot_rebalancing_comparison(
             buy_and_hold, monthly, quarterly, semiannual, annual
         )
 
-    print("\n=== Hybrid Model Final Performance ===")
-    results_list = [buy_and_hold, monthly, quarterly, semiannual, annual]
+        # 성과 요약
+        print("\n" + "=" * 70)
+        print("📊 Hybrid Model Final Performance")
+        print("=" * 70)
 
-    # Save summary metrics
-    summary_data = [res["metrics"] for res in results_list]
-    pd.DataFrame(summary_data).to_csv(save_dir / "summary_metrics.csv", index=False)
+        results_list = [buy_and_hold, monthly, quarterly, semiannual, annual]
+        summary_data = [res["metrics"] for res in results_list]
+        pd.DataFrame(summary_data).to_csv(save_dir / "summary_metrics.csv", index=False)
 
-    for res in results_list:
-        m = res["metrics"]
-        print(
-            f"{m['Strategy']:<15} | CAGR: {m['CAGR']:>6.1f}% | MDD: {m['MDD']:>6.1f}% | Final: ${m['Final_Value']:,.0f}"
-        )
+        for res in results_list:
+            m = res["metrics"]
+            print(
+                f"{m['Strategy']:15} | CAGR: {m['CAGR']:6.1f}% | MDD: {m['MDD']:6.1f}% | Final: ${m['FinalValue']:,.0f}"
+            )
 
-    # Save trade logs
-    all_logs = []
-    for res in results_list:
-        all_logs.extend(res["trade_logs"])
-    pd.DataFrame(all_logs).to_csv(save_dir / "hybrid_trade_logs.csv", index=False)
-    print(f"\n✅ Trade logs saved successfully: {save_dir / 'hybrid_trade_logs.csv'}")
+        # Trade Logs 저장
+        all_logs = []
+        for res in results_list:
+            all_logs.extend(res["trade_logs"])
+        pd.DataFrame(all_logs).to_csv(save_dir / "hybrid_trade_logs.csv", index=False)
+        print(f"\n✅ Trade logs saved: {save_dir / 'hybrid_trade_logs.csv'}")
 
 
 if __name__ == "__main__":
     import sys
 
-    # Use 'compare' as default if no argument provided
     mode = sys.argv[1] if len(sys.argv) > 1 else "compare"
     main(mode=mode)

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Data Preprocessing for 5-Factor Stock Model - 10 Stocks, 10 Years
-Converted from: data_preprocessing(5_19)이거쓸거임_ipynb의_사본.ipynb
+Data Preprocessing for 5-Factor Stock Model - 10 Stocks, 15 Years
++ Fama-French 5-Factor Integration
 """
 
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import pandas_datareader as pdr  # 🔥 추가!
 import pandas_market_calendars as mcal
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -41,6 +42,7 @@ class DailyStockFactorModel:
 
         # 현재 날짜 설정
         self.current_date = datetime.now()
+
         # 15년 전 날짜 계산
         self.fifteen_years_ago = self.current_date - relativedelta(years=15)
 
@@ -51,6 +53,9 @@ class DailyStockFactorModel:
         self.stock_data = {}
         self.daily_dates = []
         self.factor_model_data = pd.DataFrame()
+
+        # 🔥 Fama-French 데이터 저장용
+        self.ff_factors = None
 
         # 팩터 가중치 설정
         self.factor_weights = {
@@ -64,7 +69,6 @@ class DailyStockFactorModel:
     def load_stocks_from_csv(self, csv_path="stock_list.csv"):
         """stock_list.csv 파일에서 10개 종목 정보를 가져옵니다"""
         print(f"\n{csv_path} 파일에서 종목 정보 가져오기...")
-
         try:
             # CSV 파일 로드
             df = pd.read_csv(csv_path, encoding="utf-8")
@@ -81,10 +85,47 @@ class DailyStockFactorModel:
                 )
 
             return self.stocks
-
         except Exception as e:
             print(f"CSV 파일 로드 실패: {e}")
             return []
+
+    # 🔥 새로운 메서드: Fama-French 5-Factor 다운로드
+    def download_fama_french_factors(self):
+        """Fama-French 5-Factor 일별 데이터 다운로드"""
+        print("\n🔥 Fama-French 5-Factor 데이터 다운로드 중...")
+
+        try:
+            # Kenneth French Data Library에서 다운로드
+            ff_data = pdr.DataReader(
+                "F-F_Research_Data_5_Factors_2x3_daily",
+                "famafrench",
+                start=self.fifteen_years_ago.strftime("%Y-%m-%d"),
+                end=self.current_date.strftime("%Y-%m-%d"),
+            )[0]  # [0]은 일별 데이터 (월별은 [1])
+
+            # 퍼센트를 소수로 변환 (예: 0.50% → 0.005)
+            ff_data = ff_data / 100.0
+
+            # 인덱스를 날짜 컬럼으로 변환
+            ff_data = ff_data.reset_index()
+            ff_data.columns = ["Date", "Mkt_RF", "SMB", "HML", "RMW", "CMA", "RF"]
+
+            # 날짜 형식 통일
+            ff_data["Date"] = pd.to_datetime(ff_data["Date"])
+
+            self.ff_factors = ff_data
+            print(f"✅ Fama-French 팩터 다운로드 완료: {len(ff_data)}일")
+            print(f"   컬럼: Mkt-RF, SMB, HML, RMW, CMA")
+            print(f"   기간: {ff_data['Date'].min()} ~ {ff_data['Date'].max()}")
+
+            return ff_data
+
+        except Exception as e:
+            print(f"❌ Fama-French 다운로드 실패: {e}")
+            print(
+                "   커스텀 팩터만 사용합니다 (Mkt-RF, SMB, HML, RMW, CMA는 0으로 채워짐)"
+            )
+            return None
 
     def get_trading_days(self, start_date, end_date, market="NYSE"):
         """특정 기간의 모든 거래일을 찾습니다"""
@@ -104,20 +145,17 @@ class DailyStockFactorModel:
             return []
 
     def generate_daily_dates(self, market="NYSE"):
-        """지난 15년간의 모든 거래일 목록을 생성합니다"""  # 10년 → 15년
-        start_date = self.fifteen_years_ago.strftime(
-            "%Y-%m-%d"
-        )  # ten_years_ago → fifteen_years_ago
+        """지난 15년간의 모든 거래일 목록을 생성합니다"""
+        start_date = self.fifteen_years_ago.strftime("%Y-%m-%d")
         end_date = self.current_date.strftime("%Y-%m-%d")
 
         trading_days = self.get_trading_days(start_date, end_date, market)
 
-        print(
-            f"{market} 시장의 지난 15년간 거래일 {len(trading_days)}개 찾음"
-        )  # 10년 → 15년
+        print(f"{market} 시장의 지난 15년간 거래일 {len(trading_days)}개 찾음")
 
         # 일별 날짜 저장
         self.daily_dates = trading_days
+
         return trading_days
 
     def calculate_indicators_for_stock(self, symbol, name, daily_dates, market_index):
@@ -125,11 +163,6 @@ class DailyStockFactorModel:
         특정 종목의 일별 지표 계산
         (yfinance API 변경 대응)
         """
-        import yfinance as yf
-        import pandas as pd
-        import numpy as np
-        from dateutil.relativedelta import relativedelta
-
         results = []
 
         try:
@@ -215,8 +248,8 @@ class DailyStockFactorModel:
                 merged["ret"].rolling(window=252, min_periods=60).cov(merged["mkt_ret"])
             )
             rolling_var = merged["mkt_ret"].rolling(window=252, min_periods=60).var()
-            merged["beta"] = rolling_cov / rolling_var
 
+            merged["beta"] = rolling_cov / rolling_var
             hist_data["Beta"] = merged["beta"].reindex(hist_data.index)
             hist_data["Beta"] = hist_data["Beta"].fillna(1.0)
 
@@ -238,8 +271,10 @@ class DailyStockFactorModel:
             delta = adj.diff()
             up = delta.where(delta > 0, 0.0)
             down = (-delta).where(delta < 0, 0.0)
+
             roll_up = up.rolling(window=14).mean()
             roll_down = down.rolling(window=14).mean()
+
             rs = roll_up / roll_down.replace(0, 0.001)
             hist_data["RSI"] = 100 - (100 / (1 + rs))
 
@@ -248,6 +283,7 @@ class DailyStockFactorModel:
             exp2 = adj.ewm(span=26, adjust=False).mean()
             macd = exp1 - exp2
             signal = macd.ewm(span=9, adjust=False).mean()
+
             hist_data["MACD"] = macd
             hist_data["Signal"] = signal
             hist_data["MACD_Hist"] = macd - signal
@@ -272,7 +308,6 @@ class DailyStockFactorModel:
             calendar = pd.to_datetime(daily_dates)
             calendar_df = pd.DataFrame(index=calendar)
 
-            # [중요] 다음 단계 계산을 위해 'Adj Close', 'Volume'도 꼭 포함
             feature_cols = [
                 "Beta",
                 "MarketCap",
@@ -383,9 +418,11 @@ class DailyStockFactorModel:
             name = stock["name"]
 
             print(f"[{idx}/{len(self.stocks)}] {name} ({symbol}) 처리 중...")
+
             results = self.calculate_indicators_for_stock(
                 symbol, name, us_dates, "^GSPC"
             )
+
             all_results.extend(results)
 
         # 데이터프레임으로 변환
@@ -395,77 +432,42 @@ class DailyStockFactorModel:
 
     def calculate_factor_scores(self):
         """
-        [최종 수정] 고정된 재무 데이터(PBR) 대신 동적 가격 지표를 사용하여 팩터 점수 산출
+        커스텀 팩터 점수 산출
         """
-        print("\n동적 팩터 점수 계산 중 (PBR/시총 고정값 문제 해결)...")
+        print("\n동적 팩터 점수 계산 중...")
 
         df = self.factor_model_data.copy()
 
-        # 날짜 형식이 문자열이면 datetime으로 변환 (오류 방지)
+        # 날짜 형식 통일
         if df["Date"].dtype == "object":
             df["Date"] = pd.to_datetime(df["Date"])
 
-        # ---------------------------------------------------------
-        # 1. 팩터 재정의 (매일 변하는 데이터만 사용)
-        # ---------------------------------------------------------
-
-        # (1) Value Factor (가치)
-        # 기존: PBR (고정값이라 문제)
-        # 변경: 고점 대비 하락률 (많이 떨어진 주식이 싸다고 가정 -> Reversion 효과)
-        # 52주(252일) 최고가 대비 현재가 위치
-        # 주가가 많이 빠져있을수록(값이 작을수록) -> 점수를 높게 줌
+        # 1. Value Factor (고점 대비 하락률)
         df["rolling_max"] = df.groupby("ticker")["Close"].transform(
             lambda x: x.rolling(252, min_periods=1).max()
         )
         df["dd_ratio"] = df["Close"] / df["rolling_max"]
 
-        # (2) Size Factor (규모)
-        # 기존: 시가총액 (발행주식수 고정이라 변동성 적음)
-        # 변경: 일일 거래대금 (Close * Volume)의 로그값
-        # 거래대금이 작을수록(소형주 효과) -> 점수를 높게 줌
+        # 2. Size Factor (거래대금)
         df["log_liquidity"] = np.log(df["Close"] * df["Volume"] + 1)
 
-        # (3) Momentum Factor (추세)
-        # 12개월 모멘텀 사용 (높을수록 좋음)
+        # 3. Momentum Factor
         df["mom_score_raw"] = df["Momentum12M"]
 
-        # (4) Volatility Factor (안정성)
-        # 변동성 지표 사용 (낮을수록 좋음)
+        # 4. Volatility Factor
         df["vol_score_raw"] = df["Volatility"]
 
-        # (5) Quality/Beta Factor (방어성)
-        # 베타 지표 사용 (낮을수록 좋음, 시장 무관하게 움직임)
+        # 5. Beta Factor
         df["beta_score_raw"] = df["Beta"]
 
-        # ---------------------------------------------------------
-        # 2. 날짜별(Cross-Sectional) 순위 매기기 (0 ~ 1점)
-        # 매일매일 그 날짜에 살아있는 종목들끼리만 경쟁
-        # ---------------------------------------------------------
-
-        # Value: 하락률이 클수록(dd_ratio가 작을수록) 좋은 점수 -> ascending=False 후 뒤집기 or ascending=True 안됨?
-        # -> dd_ratio가 0.8(20%하락) vs 0.9(10%하락). 0.8이 더 저평가.
-        # -> Rank(ascending=False) 하면 0.9가 1등, 0.8이 2등.
-        # -> 우리는 0.8에 높은 점수 주고 싶음 -> Rank(ascending=True)가 맞음 (작은게 1등)
-        # -> Rank(pct=True) -> 0.8(낮은값)이 낮은 등수(0.1)가 나옴.
-        # -> 그래서 1 - rank 함.
+        # 날짜별 순위 (0~1)
         df["Value_Factor"] = 1 - df.groupby("Date")["dd_ratio"].rank(pct=True)
-
-        # Size: 거래대금이 작을수록(소형주) 좋은 점수
         df["Size_Factor"] = 1 - df.groupby("Date")["log_liquidity"].rank(pct=True)
-
-        # Momentum: 수익률이 높을수록 좋은 점수
         df["Momentum_Factor"] = df.groupby("Date")["mom_score_raw"].rank(pct=True)
-
-        # Volatility: 변동성이 낮을수록 좋은 점수
         df["Volatility_Factor"] = 1 - df.groupby("Date")["vol_score_raw"].rank(pct=True)
-
-        # Beta: 베타가 낮을수록(저변동) 좋은 점수 (Low Volatility 전략)
         df["Beta_Factor"] = 1 - df.groupby("Date")["beta_score_raw"].rank(pct=True)
 
-        # ---------------------------------------------------------
-        # 3. 종합 점수 계산
-        # ---------------------------------------------------------
-        # 가중치: 모멘텀과 밸류에 집중 (조절 가능)
+        # 종합 점수
         df["weighted_score"] = (
             df["Value_Factor"] * 0.2
             + df["Size_Factor"] * 0.1
@@ -474,12 +476,12 @@ class DailyStockFactorModel:
             + df["Beta_Factor"] * 0.2
         )
 
-        # 4. 최종 퍼센타일 (0~100점)
+        # 퍼센타일 (0~100)
         df["factor_percentile"] = (
             df.groupby("Date")["weighted_score"].rank(pct=True, ascending=True) * 100.0
         ).round(2)
 
-        # 5. 매매 신호 생성
+        # 매매 신호
         def get_signal(score):
             if score >= 80:
                 return "STRONG_BUY"
@@ -497,15 +499,12 @@ class DailyStockFactorModel:
             lambda x: "HIGH" if x >= 80 or x <= 20 else "MEDIUM"
         )
 
-        # 리밸런싱 우선순위 (점수 그대로)
         df["rebalance_priority"] = df["weighted_score"] * 100
-
-        # 상위 20% 교체 시그널
         df["to_rebalance"] = df["factor_percentile"].apply(
             lambda x: 1 if x <= 20 or x >= 80 else 0
         )
 
-        # 필요없는 임시 컬럼 삭제
+        # 임시 컬럼 삭제
         df = df.drop(
             columns=[
                 "rolling_max",
@@ -518,78 +517,45 @@ class DailyStockFactorModel:
         )
 
         self.factor_model_data = df
-        print("동적 팩터 점수 계산 완료.")
+        print("커스텀 팩터 점수 계산 완료.")
 
-    def save_data(self, output_dir="."):
-        """계산된 데이터를 저장합니다"""
-        if len(self.factor_model_data) == 0:
-            print("저장할 데이터가 없습니다")
-            return None
+    # 🔥 새로운 메서드: Fama-French 병합
+    def merge_fama_french_factors(self):
+        """Fama-French 팩터를 기존 데이터에 병합"""
+        if self.ff_factors is None:
+            print("\n⚠️  Fama-French 데이터가 없습니다.")
+            print("   Mkt_RF, SMB, HML, RMW, CMA 컬럼을 0으로 채웁니다.")
 
-        # 날짜와 티커로 정렬
-        self.factor_model_data = self.factor_model_data.sort_values(["Date", "Symbol"])
+            # 5-Factor 컬럼을 0으로 추가
+            self.factor_model_data["Mkt_RF"] = 0.0
+            self.factor_model_data["SMB"] = 0.0
+            self.factor_model_data["HML"] = 0.0
+            self.factor_model_data["RMW"] = 0.0
+            self.factor_model_data["CMA"] = 0.0
+            return
 
-        # 컬럼 순서 재정렬
-        cols = [
-            "Symbol",
-            "Name",
-            "Date",
-            "Close",  # 🔥 추가
-            "Volume",
-            "Beta",
-            "PBR",
-            "MarketCap",
-            "Momentum1M",
-            "Momentum3M",
-            "Momentum6M",
-            "Momentum12M",
-            "Volatility",
-            "RSI",
-            "MACD",
-            "Signal",
-            "MACD_Hist",
-            "Sector",
-            "Industry",
-            "Beta_Factor",
-            "Value_Factor",
-            "Size_Factor",
-            "Momentum_Factor",
-            "Volatility_Factor",
-            "weighted_score",
-            "factor_percentile",
-            "smart_signal",
-            "signal_strength",
-            "rebalance_priority",
-            "to_rebalance",
-        ]
+        print("\n🔥 Fama-French 팩터 병합 중...")
 
-        self.factor_model_data = self.factor_model_data[cols]
+        # 날짜 형식 통일
+        df = self.factor_model_data.copy()
+        df["Date"] = pd.to_datetime(df["Date"])
 
-        # CSV 저장
-        date_str = self.current_date.strftime("%Y%m%d")
-        output_file = os.path.join(
-            output_dir, f"processed_daily_5factor_model_10stocks_10years_{date_str}.csv"
+        ff = self.ff_factors.copy()
+        ff["Date"] = pd.to_datetime(ff["Date"])
+
+        # Left Join (종목 데이터 기준)
+        df = df.merge(
+            ff[["Date", "Mkt_RF", "SMB", "HML", "RMW", "CMA"]], on="Date", how="left"
         )
-        self.factor_model_data.to_csv(output_file, index=False)
-        print(f"\n데이터가 {output_file}에 저장되었습니다")
 
-        # 요약 정보 출력
-        print(f"\n데이터 요약:")
-        print(f"- 처리된 종목 수: {self.factor_model_data['Symbol'].nunique()}")
-        print(f"- 처리된 일 수: {self.factor_model_data['Date'].nunique()}")
-        print(f"- 총 행 수: {len(self.factor_model_data)}")
+        # 누락 값 0으로 채우기 (주말/공휴일)
+        df[["Mkt_RF", "SMB", "HML", "RMW", "CMA"]] = df[
+            ["Mkt_RF", "SMB", "HML", "RMW", "CMA"]
+        ].fillna(0)
 
-        # 매수/매도 신호 개수
-        buy_count = len(
-            self.factor_model_data[self.factor_model_data["smart_signal"] == "BUY"]
-        )
-        sell_count = len(
-            self.factor_model_data[self.factor_model_data["smart_signal"] == "SELL"]
-        )
-        print(f"- 매수 신호 수: {buy_count}")
-        print(f"- 매도 신호 수: {sell_count}")
-
-        return output_file
+        self.factor_model_data = df
+        print(f"✅ Fama-French 병합 완료: {len(df)}행")
+        print(f"   추가된 컬럼: Mkt_RF, SMB, HML, RMW, CMA")
 
     def remove_duplicates(self):
         """같은 날짜와 같은 주식 코드의 중복 데이터를 제거합니다"""
@@ -617,17 +583,101 @@ class DailyStockFactorModel:
 
         return self.factor_model_data
 
+    def save_data(self, output_dir="."):
+        """계산된 데이터를 저장합니다"""
+        if len(self.factor_model_data) == 0:
+            print("저장할 데이터가 없습니다")
+            return None
+
+        # 날짜와 티커로 정렬
+        self.factor_model_data = self.factor_model_data.sort_values(["Date", "Symbol"])
+
+        # 컬럼 순서 재정렬
+        cols = [
+            "Symbol",
+            "Name",
+            "Date",
+            "Close",
+            "Volume",
+            "Beta",
+            "PBR",
+            "MarketCap",
+            "Momentum1M",
+            "Momentum3M",
+            "Momentum6M",
+            "Momentum12M",
+            "Volatility",
+            "RSI",
+            "MACD",
+            "Signal",
+            "MACD_Hist",
+            "Sector",
+            "Industry",
+            # 커스텀 팩터
+            "Beta_Factor",
+            "Value_Factor",
+            "Size_Factor",
+            "Momentum_Factor",
+            "Volatility_Factor",
+            "weighted_score",
+            "factor_percentile",
+            "smart_signal",
+            "signal_strength",
+            "rebalance_priority",
+            "to_rebalance",
+            # 🔥 Fama-French 5-Factor
+            "Mkt_RF",
+            "SMB",
+            "HML",
+            "RMW",
+            "CMA",
+        ]
+
+        # 존재하는 컬럼만 선택
+        cols = [c for c in cols if c in self.factor_model_data.columns]
+
+        self.factor_model_data = self.factor_model_data[cols]
+
+        # CSV 저장
+        date_str = self.current_date.strftime("%Y%m%d")
+        output_file = os.path.join(
+            output_dir, f"processed_daily_5factor_model_10stocks_15years_{date_str}.csv"
+        )
+
+        self.factor_model_data.to_csv(output_file, index=False)
+        print(f"\n✅ 데이터가 {output_file}에 저장되었습니다")
+
+        # 요약 정보 출력
+        print(f"\n📊 데이터 요약:")
+        print(f"  - 처리된 종목 수: {self.factor_model_data['Symbol'].nunique()}")
+        print(f"  - 처리된 일 수: {self.factor_model_data['Date'].nunique()}")
+        print(f"  - 총 행 수: {len(self.factor_model_data)}")
+
+        # 5-Factor 확인
+        if "Mkt_RF" in self.factor_model_data.columns:
+            print(f"  - 🔥 Fama-French 5-Factor 포함 여부: ✅")
+            print(f"     Mkt_RF 평균: {self.factor_model_data['Mkt_RF'].mean():.4f}")
+            print(f"     SMB 평균: {self.factor_model_data['SMB'].mean():.4f}")
+            print(f"     HML 평균: {self.factor_model_data['HML'].mean():.4f}")
+        else:
+            print(f"  - 🔥 Fama-French 5-Factor 포함 여부: ❌")
+
+        return output_file
+
     def run_pipeline(self, csv_path="stock_list.csv", output_dir="."):
         """전체 데이터 파이프라인을 실행합니다"""
-        print(f"시작 시간: {self.current_date.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"⏰ 시작 시간: {self.current_date.strftime('%Y-%m-%d %H:%M:%S')}")
         print(
-            f"데이터 기간: {self.fifteen_years_ago.strftime('%Y-%m-%d')} ~ {self.current_date.strftime('%Y-%m-%d')}"  # ten_years_ago → fifteen_years_ago
+            f"📅 데이터 기간: {self.fifteen_years_ago.strftime('%Y-%m-%d')} ~ {self.current_date.strftime('%Y-%m-%d')}"
         )
 
         # CSV에서 종목 목록 가져오기
         self.load_stocks_from_csv(csv_path)
 
-        # 일별 지표 계산 (15년치)  # 주석도 수정
+        # 🔥 Fama-French 다운로드
+        self.download_fama_french_factors()
+
+        # 일별 지표 계산 (15년치)
         self.calculate_all_indicators()
 
         # 중복 제거
@@ -636,12 +686,15 @@ class DailyStockFactorModel:
         # 팩터 점수 계산
         self.calculate_factor_scores()
 
+        # 🔥 Fama-French 병합
+        self.merge_fama_french_factors()
+
         # 데이터 저장
         self.save_data(output_dir)
 
         # 총 실행 시간 출력
         elapsed_time = time.time() - self.start_time
-        print(f"\n전체 처리 완료! 총 실행 시간: {elapsed_time:.2f}초")
+        print(f"\n✅ 전체 처리 완료! 총 실행 시간: {elapsed_time:.2f}초")
 
         return self.factor_model_data
 
@@ -656,18 +709,18 @@ def main():
     PROJECT_ROOT = SCRIPT_DIR.parent  # SMS_Backtesting 폴더
 
     parser = argparse.ArgumentParser(
-        description="5-Factor Stock Model - 10 Stocks, 15 Years"
+        description="5-Factor Stock Model with Fama-French - 10 Stocks, 15 Years"
     )
     parser.add_argument(
         "--csv",
         type=str,
-        default=str(PROJECT_ROOT / "data" / "stock_list.csv"),  # 🔥 절대 경로
+        default=str(PROJECT_ROOT / "data" / "stock_list.csv"),
         help="Path to stock list CSV file",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default=str(PROJECT_ROOT / "data"),  # 🔥 절대 경로
+        default=str(PROJECT_ROOT / "data"),
         help="Output directory for processed data",
     )
 
