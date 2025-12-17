@@ -31,13 +31,15 @@
 - **Adjacency Matrix**: `(Batch, N_stocks, N_stocks)` - 종목 간 수익률 상관관계
 
 ### 2. Network Flow
+```
 Input Features → TGNN Encoder → Node Embeddings
-↓
-Alpha Network (α 계산)
-↓
-TGNN Weights ←─ α ─→ 1/N Weights
-↓
-Ensemble Portfolio (Action)
+                                       ↓
+                            Alpha Network (α 계산)
+                                       ↓
+        TGNN Weights ←─ α ─→ 1/N Weights
+                       ↓
+              Ensemble Portfolio (Action)
+```
 
 **핵심 구성 요소:**
 1. **Graph Convolution Layer**: 종목 간 정보 전파 (이웃 노드 집계)
@@ -52,47 +54,52 @@ Ensemble Portfolio (Action)
 ---
 
 ## 📂 디렉토리 구조
+
+```
 models/Hybrid_TGNN_DDPG/
 │
-├── 📁 agent/ # 강화학습 에이전트
-│ ├── hybrid_agent.py # HybridAgent (DDPG 학습 로직)
-│ └── replay_buffer.py # 경험 리플레이 버퍼
+├── 📁 agent/                      # 강화학습 에이전트
+│   ├── hybrid_agent.py           # HybridAgent (DDPG 학습 로직)
+│   └── replay_buffer.py          # 경험 리플레이 버퍼
 │
-├── 📁 environment/ # 포트폴리오 환경
-│ ├── dataset.py # HybridDataset (데이터 로드/전처리)
-│ └── portfolio_env.py # HybridPortfolioEnv (RL 환경)
+├── 📁 environment/                # 포트폴리오 환경
+│   ├── dataset.py                # HybridDataset (데이터 로드/전처리)
+│   └── portfolio_env.py          # HybridPortfolioEnv (RL 환경)
 │
-├── 📁 networks/ # 신경망 아키텍처
-│ ├── actor.py # HybridActor (정책 네트워크)
-│ ├── critic.py # HybridCritic (가치 네트워크)
-│ ├── tgnn_encoder.py # TGNN 시계열 그래프 인코더
-│ └── graph_layers.py # GraphConvLayer, TemporalAttention
+├── 📁 networks/                   # 신경망 아키텍처
+│   ├── actor.py                  # HybridActor (정책 네트워크)
+│   ├── critic.py                 # HybridCritic (가치 네트워크)
+│   ├── tgnn_encoder.py           # TGNN 시계열 그래프 인코더
+│   └── graph_layers.py           # GraphConvLayer, TemporalAttention
 │
-├── 📁 utils/ # 유틸리티
-│ ├── metrics.py # 성과 지표 계산 (CAGR, MDD, Sharpe)
-│ └── constraints.py # 포트폴리오 제약 조건
+├── 📁 utils/                      # 유틸리티
+│   ├── metrics.py                # 성과 지표 계산 (CAGR, MDD, Sharpe)
+│   └── constraints.py            # 포트폴리오 제약 조건
 │
-├── 📄 run_comparison.py # 메인 실행 스크립트
-├── 📄 training_monitor.py # 학습 진행 모니터링 (NEW)
-├── 📄 visualization.py # 백테스팅 결과 시각화
-├── 💾 best_hybrid.pth # 학습된 모델 가중치
-└── 📘 README.md # 현재 문서
-
+├── 📄 run_comparison.py           # 메인 실행 스크립트
+├── 📄 training_monitor.py         # 학습 진행 모니터링 (NEW)
+├── 📄 visualization.py            # 백테스팅 결과 시각화
+├── 💾 best_hybrid.pth             # 학습된 모델 가중치
+└── 📘 README.md                   # 현재 문서
+```
 
 ---
 
 ## 🚀 실행 방법
 
 ### 사전 준비
-프로젝트 루트에서 전처리 실행 (최초 1회)
+```bash
+# 프로젝트 루트에서 전처리 실행 (최초 1회)
 python -m preprocessing.pipeline
+```
 - `data/train_data.csv` (2006-2020)
 - `data/test_data.csv` (2021-2025) 생성
 
 ### 1. 모델 학습 (Train Mode)
+```bash
 cd models/Hybrid_TGNN_DDPG
 python run_comparison.py train
-
+```
 
 **학습 과정:**
 - 총 200 에피소드 (약 30분 소요, GPU 권장)
@@ -107,9 +114,9 @@ python run_comparison.py train
 - Ensemble Alpha: TGNN 가중치
 
 ### 2. 백테스팅 (Compare Mode)
+```bash
 python run_comparison.py compare
-
-text
+```
 
 **비교 전략:**
 - 1/N Buy & Hold (벤치마크)
@@ -119,16 +126,16 @@ text
 - Hybrid_annual (연간 리밸런싱)
 
 **출력 결과:**
+```
 results/03_Hybrid_TGNN_DDPG/
-├── training_logs/ # 학습 진행 차트
-│ ├── training_progress_ep50.jpg
-│ ├── training_progress_ep100.jpg
-│ └── ...
-├── hybrid_comparison.jpg # 전략별 수익률 비교
-├── summary_metrics.csv # 성과 지표 요약
-└── hybrid_trade_logs.csv # 리밸런싱 내역
-
-text
+├── training_logs/                # 학습 진행 차트
+│   ├── training_progress_ep50.jpg
+│   ├── training_progress_ep100.jpg
+│   └── ...
+├── hybrid_comparison.jpg         # 전략별 수익률 비교
+├── summary_metrics.csv           # 성과 지표 요약
+└── hybrid_trade_logs.csv         # 리밸런싱 내역
+```
 
 ---
 
@@ -151,23 +158,23 @@ text
 ## 🔧 하이퍼파라미터
 
 ### 학습 설정
-num_episodes = 200 # 학습 에피소드
-batch_size = 64 # 미니배치 크기
-replay_buffer_size = 10000 # 경험 버퍼 용량
-learning_rate_actor = 1e-4 # Actor 학습률
-learning_rate_critic = 1e-3 # Critic 학습률
-gamma = 0.99 # 할인율
-tau = 0.005 # Target 네트워크 업데이트 비율
-
-text
+```python
+num_episodes = 200           # 학습 에피소드
+batch_size = 64              # 미니배치 크기
+replay_buffer_size = 10000   # 경험 버퍼 용량
+learning_rate_actor = 1e-4   # Actor 학습률
+learning_rate_critic = 1e-3  # Critic 학습률
+gamma = 0.99                 # 할인율
+tau = 0.005                  # Target 네트워크 업데이트 비율
+```
 
 ### 모델 구조
-window_size = 12 # 입력 시계열 길이 (월)
-num_features = 20 # 종목별 feature 개수
-hidden_dim = 64 # TGNN hidden 차원
-num_heads = 4 # Attention head 개수
-
-text
+```python
+window_size = 12             # 입력 시계열 길이 (월)
+num_features = 20            # 종목별 feature 개수
+hidden_dim = 64              # TGNN hidden 차원
+num_heads = 4                # Attention head 개수
+```
 
 ---
 
