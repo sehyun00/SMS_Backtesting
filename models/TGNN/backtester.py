@@ -1,9 +1,10 @@
 """
 논문용 백테스팅 시스템
 - 시계열 데이터 수집
-- 집계 지표 계산 (Sharpe, Sortino, Calmar, MDD, VaR, CVaR 등)
+- 집계 지표 계산 (Sharpe, Sortino, Calmar, MDD, Avg Annual DD 등)
 - CSV/JSON 저장
 - [수정] 자산 계산 시 스케일링 된 값이 아닌 원본 수익률 사용
+- [수정] Average Annual Drawdown 지표 추가
 """
 
 import numpy as np
@@ -36,7 +37,6 @@ class HybridLoss(nn.Module):
 
         return (self.alpha * mse_loss) + (self.beta * corr_loss) + ((1 - self.alpha - self.beta) * sign_loss)
 
-
 def evaluate_metrics(y_true, y_pred):
     y_true = np.array(y_true).flatten()
     y_pred = np.array(y_pred).flatten()
@@ -53,17 +53,15 @@ def evaluate_metrics(y_true, y_pred):
         "MSE": mse, "MAE": mae, "Correlation": correlation, "Direction_Acc": direction_acc
     }
 
-
 # --- 2. 백테스팅 설정 및 클래스 ---
 
 @dataclass
 class BacktestConfig:
     initial_capital: float = 1_000_000
-    cost_bps: float = 5.0  # 거래비용 (basis points)
+    cost_bps: float = 10.0  # 거래비용 (basis points)
     risk_free_rate: float = 0.03  # 연간 무위험 수익률 (3%)
     top_k: int = 5
     weighting_method: str = "equal" # 'softmax', 'equal', 'rank'
-
 
 @dataclass
 class TimeSeriesRecord:
@@ -77,7 +75,6 @@ class TimeSeriesRecord:
     weights: np.ndarray
     benchmark_return: float = 0.0
     excess_return: float = 0.0
-
 
 class Backtester:
     def __init__(self, model, dataset, config: BacktestConfig = None, strategy_name: str = "TGNN"):
@@ -94,12 +91,17 @@ class Backtester:
         return e_x / e_x.sum()
     
     def run(self, rebalance_freq: str = "monthly", benchmark_weights: np.ndarray = None) -> Dict:
-        freq_map = {"daily": 1, "weekly": 5, "monthly": 20, "quarterly": 60, "semiannual": 120, "annual": 240} 
+        freq_map = {
+            "monthly": 1, 
+            "quarterly": 3, 
+            "semiannual": 6, 
+            "annual": 12
+        } 
         
         if isinstance(rebalance_freq, int):
             interval = rebalance_freq
         else:
-            interval = freq_map.get(rebalance_freq, 20)
+            interval = freq_map.get(rebalance_freq, 1)
         
         self.model.eval()
         
@@ -109,7 +111,10 @@ class Backtester:
         # 종목 수 확인
         try:
             sample_batch = self.dataset[0]
-            n_stocks = len(sample_batch["active_mask"])
+            if "active_mask" in sample_batch:
+                n_stocks = len(sample_batch["active_mask"])
+            else:
+                n_stocks = sample_batch["adj_matrix"].shape[0]
         except:
             n_stocks = 10 
 
@@ -125,21 +130,22 @@ class Backtester:
             for idx in range(len(self.dataset)):
                 batch = self.dataset[idx]
                 
-                # features: 모델 입력용 (스케일링 됨)
                 features = batch["features"].unsqueeze(0)
                 adj = batch["adj_matrix"].unsqueeze(0)
-                active_mask = batch["active_mask"].numpy()
                 
-                # [핵심 수정] 수익률 계산용: 원본 수익률 사용
-                # TGNNDataset에서 'raw_labels'를 제공해야 함. 없으면 labels 사용하되 경고.
+                if "active_mask" in batch:
+                    active_mask = batch["active_mask"].numpy()
+                else:
+                    active_mask = np.ones(n_stocks, dtype=bool)
+                
+                # [핵심] 실제 수익률 가져오기
                 if "raw_labels" in batch:
                     actual_returns = batch["raw_labels"].numpy()
                 else:
                     actual_returns = batch["labels"].numpy()
-                    # 만약 labels가 스케일링 된 값이라면 여기서 큰일남.
-                    # 임시 안전장치: 수익률이 100%(1.0)를 넘으면 0.01로 클리핑
+                    # 안전장치
                     if np.max(np.abs(actual_returns)) > 1.0:
-                         actual_returns = actual_returns * 0.01 # 임의 보정 (위험)
+                         actual_returns = actual_returns * 0.01
 
                 if hasattr(self.dataset, 'windows'):
                     date = self.dataset.windows[idx]["date"]
@@ -159,16 +165,23 @@ class Backtester:
                     
                     new_weights = np.zeros(n_stocks)
                     if k > 0:
-                        top_k_idx = np.argsort(pred_returns)[-k:]
+                        # 유효한 값들만 필터링
+                        valid_indices = np.where(pred_returns != -np.inf)[0]
                         
-                        if self.config.weighting_method == 'softmax':
-                            top_scores = pred_returns[top_k_idx]
-                            new_weights[top_k_idx] = self.softmax(top_scores)
-                        elif self.config.weighting_method == 'rank':
-                            ranks = np.arange(1, k + 1)
-                            new_weights[top_k_idx] = ranks / ranks.sum()
-                        else: # equal
-                            new_weights[top_k_idx] = 1.0 / k
+                        if len(valid_indices) >= k:
+                            top_k_idx = np.argsort(pred_returns)[-k:]
+                            
+                            if self.config.weighting_method == 'softmax':
+                                top_scores = pred_returns[top_k_idx]
+                                new_weights[top_k_idx] = self.softmax(top_scores)
+                            elif self.config.weighting_method == 'rank':
+                                ranks = np.arange(1, k + 1)
+                                new_weights[top_k_idx] = ranks / ranks.sum()
+                            else: # equal
+                                new_weights[top_k_idx] = 1.0 / k
+                        elif len(valid_indices) > 0:
+                            # k개보다 적으면 있는 것만이라도 매수
+                            new_weights[valid_indices] = 1.0 / len(valid_indices)
                     
                     prev_weights = current_weights.copy()
                     current_weights = new_weights
@@ -188,13 +201,12 @@ class Backtester:
                 
                 # 자산 업데이트
                 capital = capital * (1 + portfolio_return) - transaction_cost
-                if capital < 0: capital = 0 # 파산 처리
                 
                 peak = max(peak, capital)
                 if peak > 0:
                     drawdown = (capital - peak) / peak
                 else:
-                    drawdown = -1.0
+                    drawdown = 0.0 # 초기값이거나 손실이 없는 경우
                 
                 cumulative_return = (capital / self.config.initial_capital - 1)
                 excess_return = portfolio_return - benchmark_return
@@ -209,7 +221,6 @@ class Backtester:
                     "transaction_cost": transaction_cost,
                     "benchmark_return": benchmark_return,
                     "excess_return": excess_return,
-                    "weights": current_weights.copy(),
                     "active_stocks": int(np.sum(active_mask)),
                 })
         
@@ -226,18 +237,24 @@ class Backtester:
         capital = self.config.initial_capital
         peak = capital
         try:
-            n_stocks = len(self.dataset[0]["active_mask"])
+            sample_batch = self.dataset[0]
+            if "active_mask" in sample_batch:
+                n_stocks = len(sample_batch["active_mask"])
+            else:
+                n_stocks = sample_batch["adj_matrix"].shape[0]
         except:
              n_stocks = 10
 
-        weights = np.ones(n_stocks) / n_stocks
         history_bh = []
         
         for idx in range(len(self.dataset)):
             batch = self.dataset[idx]
-            active_mask = batch["active_mask"].numpy()
             
-            # [핵심 수정] raw_labels 확인
+            if "active_mask" in batch:
+                active_mask = batch["active_mask"].numpy()
+            else:
+                active_mask = np.ones(n_stocks, dtype=bool)
+            
             if "raw_labels" in batch:
                 actual_returns = batch["raw_labels"].numpy()
             else:
@@ -263,7 +280,7 @@ class Backtester:
             if peak > 0:
                 drawdown = (capital - peak) / peak
             else:
-                drawdown = -1.0
+                drawdown = 0.0
             
             cumulative_return = (capital / self.config.initial_capital - 1)
             
@@ -277,7 +294,6 @@ class Backtester:
                 "transaction_cost": 0.0,
                 "benchmark_return": portfolio_return,
                 "excess_return": 0.0,
-                "weights": active_weights.copy(),
                 "active_stocks": int(n_active),
             })
         
@@ -298,35 +314,55 @@ class Backtester:
         if df.empty: return {}
             
         returns = df["period_return"].values
-        excess_returns = df["excess_return"].values
+        periods_per_year = 12 # 기본 월간 데이터 가정
         
-        n_periods = len(returns)
-        # 월간 데이터라고 가정 (20일이 아니라 월 1회 데이터 포인트면 12, 일별이면 252)
-        # 여기서는 run_train_test에서 윈도우를 월 단위로 생성하므로 12가 맞음
-        periods_per_year = 12 
-        
+        # CAGR
         total_return = (df["portfolio_value"].iloc[-1] / self.config.initial_capital - 1)
-        years = n_periods / periods_per_year
+        
+        if "date" in df.columns:
+            days = (pd.to_datetime(df["date"].iloc[-1]) - pd.to_datetime(df["date"].iloc[0])).days
+            years = days / 365.0
+        else:
+            years = len(df) / periods_per_year
+
         if years > 0.1 and total_return > -1:
             cagr = (1 + total_return) ** (1 / years) - 1
         else:
-            cagr = -1.0 # 파산 or 데이터 부족
+            cagr = 0.0 
         
+        # Volatility
         volatility = returns.std() * np.sqrt(periods_per_year)
+        
+        # MDD
         max_drawdown = df["drawdown"].min()
         
+        # [신규] Average Annual Drawdown
+        # 연도별로 그룹화하여 각 연도의 MDD(최소 drawdown 값)를 구하고 평균을 냄
+        df['year'] = pd.to_datetime(df['date']).dt.year
+        yearly_mdd = df.groupby('year')['drawdown'].min()
+        avg_annual_dd = yearly_mdd.mean()
+        
+        # Sharpe
+        rf_period = self.config.risk_free_rate / periods_per_year
+        if returns.std() > 1e-9:
+            sharpe_ratio = (returns.mean() - rf_period) / returns.std() * np.sqrt(periods_per_year)
+        else:
+            sharpe_ratio = 0.0
+            
+        # Sortino
         downside_returns = returns[returns < 0]
         downside_deviation = downside_returns.std() * np.sqrt(periods_per_year) if len(downside_returns) > 0 else 1e-8
         
-        rf_period = self.config.risk_free_rate / periods_per_year
+        if downside_deviation > 1e-9:
+            sortino_ratio = (returns.mean() - rf_period) / downside_deviation
+        else:
+            sortino_ratio = 0.0
         
-        sharpe_ratio = (returns.mean() - rf_period) / (returns.std() + 1e-8) * np.sqrt(periods_per_year)
-        sortino_ratio = (returns.mean() - rf_period) / downside_deviation
-        
-        if max_drawdown != 0:
+        # Calmar
+        if abs(max_drawdown) > 1e-9:
             calmar_ratio = cagr / abs(max_drawdown)
         else:
-            calmar_ratio = 0
+            calmar_ratio = 0.0
         
         avg_turnover = df["turnover"].mean()
         
@@ -335,6 +371,7 @@ class Backtester:
             "cagr": cagr * 100,
             "volatility": volatility * 100,
             "max_drawdown": max_drawdown * 100,
+            "avg_annual_dd": avg_annual_dd * 100, # 추가됨
             "sharpe_ratio": sharpe_ratio,
             "sortino_ratio": sortino_ratio,
             "calmar_ratio": calmar_ratio,
@@ -357,20 +394,16 @@ class Backtester:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, default=str)
 
-
 def create_metrics_summary_table(all_metrics: Dict) -> pd.DataFrame:
     rows = []
     for strategy, metrics in all_metrics.items():
         row = {
-            "전략": strategy,
-            "누적수익률": f"{metrics.get('total_return', 0):.2f}%",
+            "Strategy": strategy,
+            "Cumulative Return": f"{metrics.get('total_return', 0):.2f}%",
             "CAGR": f"{metrics.get('cagr', 0):.2f}%",
-            "변동성": f"{metrics.get('volatility', 0):.2f}%",
             "MDD": f"{metrics.get('max_drawdown', 0):.2f}%",
+            "Avg Annual DD": f"{metrics.get('avg_annual_dd', 0):.2f}%", # 추가됨
             "Sharpe": f"{metrics.get('sharpe_ratio', 0):.2f}",
-            "Sortino": f"{metrics.get('sortino_ratio', 0):.2f}",
-            "Calmar": f"{metrics.get('calmar_ratio', 0):.2f}",
-            "Avg Turnover": f"{metrics.get('avg_turnover', 0):.2f}%",
         }
         rows.append(row)
     return pd.DataFrame(rows)
