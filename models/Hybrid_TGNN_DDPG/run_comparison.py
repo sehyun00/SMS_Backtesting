@@ -326,6 +326,15 @@ def main(mode="compare"):
         "CMA",
     ]
 
+    # Sector One-Hot Encoding
+    train_sectors = pd.get_dummies(train_df["Sector"], prefix="Sector")
+    test_sectors = pd.get_dummies(test_df["Sector"], prefix="Sector")
+
+    train_df = pd.concat([train_df, train_sectors], axis=1)
+    test_df = pd.concat([test_df, test_sectors], axis=1)
+
+    feature_cols.extend(train_sectors.columns.tolist())
+
     print("[Initialization] Preparing Hybrid dataset...")
     dataset = HybridDataset(
         train_df, test_df, window_size=12, feature_cols=feature_cols
@@ -382,9 +391,6 @@ def main(mode="compare"):
         test_agent = HybridAgent(
             num_stocks_test, window_size, num_features, device=device
         )
-
-        # Train된 가중치 로드 시도 (호환되는 부분만)
-        print("⚠️  Warning: Train/Test 종목 수가 다릅니다. 전이 학습을 시도합니다...")
 
         # ✅ 전이 학습 로직 구현
         trained_state_dict = torch.load(model_path, map_location=device)
