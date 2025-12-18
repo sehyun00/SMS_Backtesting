@@ -20,14 +20,19 @@ class Pipeline:
     def run(self):
         print("🚀 Starting Preprocessing Pipeline...")
 
-        # 1. 종목 로드 및 생존 종목 필터링
+        # 1. 종목 로드
         self.collector.load_stocks_from_csv(self.csv_path)
-        survivor_stocks = self.collector.filter_survivor_stocks(
+
+        # 🔥 수정: Train/Test 종목 분리 필터링
+        survivors = self.collector.filter_survivor_stocks(
             start_year=self.start_year, end_year=self.end_year
         )
 
-        if not survivor_stocks:
-            print("❌ No survivor stocks found. Exiting.")
+        train_candidate_stocks = survivors["train"]
+        test_candidate_stocks = survivors["test"]
+
+        if not train_candidate_stocks:
+            print("❌ No train stocks found. Exiting.")
             return
 
         # 2. Fama-French 데이터 미리 다운로드
@@ -35,60 +40,96 @@ class Pipeline:
             start_date=f"{self.start_year}-01-01", end_date=f"{self.end_year}-12-31"
         )
 
-        all_stocks_data = []
+        # 🔥 수정: Train 데이터 수집 (2006-2020)
+        print(
+            f"\n📊 Processing {len(train_candidate_stocks)} TRAIN stocks (2006-2020)..."
+        )
+        train_data_list = []
 
-        # 3. 각 종목별 데이터 처리 루프
-        print(f"\n🔄 Processing {len(survivor_stocks)} stocks...")
-        for stock_info in survivor_stocks:
+        for stock_info in train_candidate_stocks:
             symbol = stock_info["Symbol"]
 
-            # 3-1. OHLCV 데이터 수집
+            # Train 기간만 수집
             df = self.collector.fetch_daily_data(
-                symbol,
-                start_date=f"{self.start_year}-01-01",
-                end_date=f"{self.end_year}-12-31",
+                symbol, start_date="2006-01-01", end_date="2020-12-31"
             )
 
             if df is None or df.empty:
                 continue
 
-            # 3-2. 기술적 지표 추가
+            # 기술적 지표 & 팩터 추가
             df = TechnicalIndicators.add_all_indicators(df)
-
-            # 3-3. 팩터 점수 계산
             df = FactorCalculator.calculate_factors(df)
             df = FactorCalculator.calculate_weighted_score(df)
 
-            # 메타데이터(섹터 등) 보존
+            # 메타데이터
             df["Sector"] = stock_info["Sector"]
             df["Industry"] = stock_info.get("Industry", "Unknown")
-            df["Date"] = df.index  # 인덱스를 컬럼으로
+            df["Date"] = df.index
 
-            all_stocks_data.append(df)
+            train_data_list.append(df)
 
-        if not all_stocks_data:
-            print("❌ No data collected.")
+        # 🔥 수정: Test 데이터 수집 (2021-2025)
+        print(
+            f"\n📊 Processing {len(test_candidate_stocks)} TEST stocks (2021-2025)..."
+        )
+        test_data_list = []
+
+        for stock_info in test_candidate_stocks:
+            symbol = stock_info["Symbol"]
+
+            # Test 기간만 수집
+            df = self.collector.fetch_daily_data(
+                symbol, start_date="2021-01-01", end_date="2025-12-31"
+            )
+
+            if df is None or df.empty:
+                continue
+
+            # 동일 처리
+            df = TechnicalIndicators.add_all_indicators(df)
+            df = FactorCalculator.calculate_factors(df)
+            df = FactorCalculator.calculate_weighted_score(df)
+
+            df["Sector"] = stock_info["Sector"]
+            df["Industry"] = stock_info.get("Industry", "Unknown")
+            df["Date"] = df.index
+
+            test_data_list.append(df)
+
+        if not train_data_list:
+            print("❌ No train data collected.")
             return
 
-        # 4. 전체 데이터 병합
-        full_df = pd.concat(all_stocks_data, ignore_index=True)
-        print(f"📊 Total Records Collected: {len(full_df)}")
+        # 🔥 수정: Train/Test 병합
+        train_full_df = pd.concat(train_data_list, ignore_index=True)
+        test_full_df = pd.concat(test_data_list, ignore_index=True)
 
-        # 5. Fama-French 병합
-        full_df = self.ff_loader.merge_with_stock_data(full_df)
+        print(f"📊 Train Total: {len(train_full_df):,} rows")
+        print(f"📊 Test Total: {len(test_full_df):,} rows")
 
-        # 6. 학습/테스트 데이터 분할 (섹터별 분할 로직 적용)
-        splitter = DataSplitter(full_df, survivor_stocks)
-        train_df, test_df, train_list, test_list = splitter.split_by_sector_and_date(
-            train_end_year=2020
+        # Fama-French 병합
+        train_full_df = self.ff_loader.merge_with_stock_data(train_full_df)
+        test_full_df = self.ff_loader.merge_with_stock_data(test_full_df)
+
+        # 🔥 수정: 섹터별 종목 선택
+        splitter = DataSplitter(
+            train_full_df, test_full_df, train_candidate_stocks, test_candidate_stocks
         )
 
-        # 7. 저장
-        splitter.save_datasets(train_df, test_df, self.output_dir)
+        final_train_df, final_test_df, train_symbols, test_symbols = (
+            splitter.split_by_sector(
+                train_per_sector=5,  # 섹터당 5개
+                test_total=7,  # 총 7개 고정
+            )
+        )
+
+        # 저장
+        splitter.save_datasets(final_train_df, final_test_df, self.output_dir)
 
         print("\n✅ Pipeline Completed Successfully.")
-        print(f"   Train Stocks ({len(train_list)}): {train_list}")
-        print(f"   Test Stocks ({len(test_list)}): {test_list}")
+        print(f"   Train Stocks ({len(train_symbols)}): {train_symbols}")
+        print(f"   Test Stocks ({len(test_symbols)}): {test_symbols}")
 
 
 if __name__ == "__main__":
