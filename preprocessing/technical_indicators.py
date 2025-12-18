@@ -27,8 +27,7 @@ class TechnicalIndicators:
         #    여기서는 순수 가격 기반 지표만 계산하거나 
         #    별도 메서드로 분리하는 것이 좋습니다.
         #    (기존 코드에 있던 MarketCap 등은 Volume * Close로 추정 가능하지만
-        #     정확한 시가총액/PBR은 재무 데이터가 필요함. 일단 기존 로직 유지)
-        
+        #     정확한 시가총액/PBR은 재무 데이터가 필요함. 일단 기존 로직 유지)Momentum1M 
         return df
 
     @staticmethod

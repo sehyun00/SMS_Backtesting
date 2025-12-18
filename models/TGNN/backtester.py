@@ -1,8 +1,9 @@
 """
-논문용 백테스팅 시스템
+논문용 백테스팅 시스템 (Multi-Output TGNN 지원)
 - 시계열 데이터 수집
 - 집계 지표 계산 (Sharpe, Sortino, Calmar, MDD, VaR, CVaR 등)
 - CSV/JSON 저장
+- Multi-Output 모델의 타겟 헤드 선택 지원
 """
 
 import numpy as np
@@ -21,6 +22,7 @@ class BacktestConfig:
     cost_bps: float = 5.0  # 거래비용 (basis points)
     risk_free_rate: float = 0.03  # 연간 무위험 수익률 (3%)
     top_k: int = 5  # 상위 K개 종목 선택
+    weighting_method: str = "softmax"  # "softmax" or "equal"
 
 
 @dataclass
@@ -46,6 +48,7 @@ class Backtester:
     - 시계열 데이터 수집 (포트폴리오 가치, 수익률, 드로다운, 턴오버 등)
     - 집계 지표 계산 (Sharpe, Sortino, Calmar 등)
     - CSV/JSON 저장
+    - Multi-Output TGNN 지원 (target_type 파라미터)
     """
     
     def __init__(self, model, dataset, config: BacktestConfig = None, strategy_name: str = "TGNN"):
@@ -56,6 +59,7 @@ class Backtester:
         
         self.history: List[Dict] = []
         self.metrics: Dict = {}
+        self.target_type: str = "Momentum1M"  # 🔥 기본 타겟 (외부에서 변경 가능)
         
     def softmax(self, x: np.ndarray) -> np.ndarray:
         """배열을 확률 분포로 변환"""
@@ -96,15 +100,31 @@ class Backtester:
                 batch = self.dataset[idx]
                 date = self.dataset.windows[idx]["date"]
                 active_mask = batch["active_mask"].numpy()
-                actual_returns = batch["labels"].numpy()
+                
+                # 🔥 실제 수익률은 target_type에 해당하는 라벨 사용
+                if self.target_type in batch:
+                    actual_returns = batch[self.target_type].numpy()
+                else:
+                    # 기존 방식 (단일 출력 모델 호환)
+                    actual_returns = batch.get("labels", batch.get("Momentum1M")).numpy()
                 
                 # 리밸런싱 시점
                 if idx % interval == 0:
                     features = batch["features"].unsqueeze(0)
                     adj = batch["adj_matrix"].unsqueeze(0)
                     
-                    predictions, _ = self.model(features, adj)
+                    # 🔥 Multi-Output 모델: target_type 파라미터 전달
+                    try:
+                        predictions, _ = self.model(features, adj, target_type=self.target_type)
+                    except TypeError:
+                        # 단일 출력 모델 (기존 모델 호환)
+                        predictions, _ = self.model(features, adj)
+                    
                     pred_returns = predictions.squeeze(0).numpy()
+                    
+                    # 🔥 NaN/Inf 체크 및 클리핑
+                    pred_returns = np.nan_to_num(pred_returns, nan=-np.inf, posinf=10.0, neginf=-10.0)
+                    pred_returns = np.clip(pred_returns, -10.0, 10.0)
                     
                     # 상장 전 종목 제외
                     pred_returns[~active_mask] = -np.inf
@@ -116,8 +136,12 @@ class Backtester:
                     new_weights = np.zeros(n_stocks)
                     if k > 0:
                         top_k_idx = np.argsort(pred_returns)[-k:]
-                        top_scores = pred_returns[top_k_idx]
-                        new_weights[top_k_idx] = self.softmax(top_scores)
+                        
+                        if self.config.weighting_method == "softmax":
+                            top_scores = pred_returns[top_k_idx]
+                            new_weights[top_k_idx] = self.softmax(top_scores)
+                        else:  # equal
+                            new_weights[top_k_idx] = 1.0 / k
                     
                     prev_weights = current_weights.copy()
                     current_weights = new_weights
@@ -128,11 +152,19 @@ class Backtester:
                 # 거래비용
                 transaction_cost = turnover * capital * (self.config.cost_bps / 10000)
                 
+                # 🔥 실제 수익률 클리핑 (극단값 방지)
+                actual_returns = np.clip(actual_returns, -50.0, 50.0)
+                
                 # 포트폴리오 수익률
                 portfolio_return = np.dot(current_weights, actual_returns)
                 
                 # 벤치마크 수익률
                 benchmark_return = np.dot(benchmark_weights, actual_returns)
+                
+                # 🔥 수익률 검증
+                if np.isnan(portfolio_return) or np.isinf(portfolio_return):
+                    print(f"⚠️ Warning: Invalid portfolio_return at {date}: {portfolio_return}")
+                    portfolio_return = 0.0
                 
                 # 자산 업데이트
                 capital = capital * (1 + portfolio_return / 100) - transaction_cost
@@ -186,8 +218,16 @@ class Backtester:
         for idx in range(len(self.dataset)):
             batch = self.dataset[idx]
             date = self.dataset.windows[idx]["date"]
-            actual_returns = batch["labels"].numpy()
             active_mask = batch["active_mask"].numpy()
+            
+            # 🔥 Momentum1M 사용 (월별 수익률)
+            if "Momentum1M" in batch:
+                actual_returns = batch["Momentum1M"].numpy()
+            else:
+                actual_returns = batch.get("labels", torch.zeros(n_stocks)).numpy()
+            
+            # 🔥 극단값 클리핑
+            actual_returns = np.clip(actual_returns, -50.0, 50.0)
             
             # 활성 종목만 동일가중
             n_active = np.sum(active_mask)
@@ -198,6 +238,11 @@ class Backtester:
                 active_weights = weights
             
             portfolio_return = np.dot(active_weights, actual_returns)
+            
+            # 🔥 검증
+            if np.isnan(portfolio_return) or np.isinf(portfolio_return):
+                portfolio_return = 0.0
+            
             capital = capital * (1 + portfolio_return / 100)
             
             peak = max(peak, capital)
@@ -229,6 +274,9 @@ class Backtester:
     
     def _calculate_metrics(self) -> Dict:
         """집계 지표 계산"""
+        if not self.history:
+            return {}
+        
         df = pd.DataFrame(self.history)
         returns = df["period_return"].values / 100  # 퍼센트 → 소수
         excess_returns = df["excess_return"].values / 100
@@ -242,7 +290,7 @@ class Backtester:
         cagr = (1 + total_return) ** (1 / years) - 1 if years > 0 else 0
         
         # === 위험 지표 ===
-        volatility = returns.std() * np.sqrt(periods_per_year)
+        volatility = returns.std() * np.sqrt(periods_per_year) if len(returns) > 0 else 0
         max_drawdown = df["drawdown"].min() / 100  # 퍼센트 → 소수
         
         # Downside Deviation
@@ -250,7 +298,7 @@ class Backtester:
         downside_deviation = downside_returns.std() * np.sqrt(periods_per_year) if len(downside_returns) > 0 else 0
         
         # VaR & CVaR (95%)
-        var_95 = np.percentile(returns, 5)
+        var_95 = np.percentile(returns, 5) if len(returns) > 0 else 0
         cvar_95 = returns[returns <= var_95].mean() if len(returns[returns <= var_95]) > 0 else var_95
         
         # === 위험조정 수익 ===
@@ -266,8 +314,8 @@ class Backtester:
         information_ratio = excess_return_annualized / tracking_error if tracking_error > 0 else 0
         
         # === 거래 특성 ===
-        avg_turnover = df["turnover"].mean()
-        total_transaction_cost = df["transaction_cost"].sum()
+        avg_turnover = df["turnover"].mean() if "turnover" in df.columns else 0
+        total_transaction_cost = df["transaction_cost"].sum() if "transaction_cost" in df.columns else 0
         
         # 거래비용별 순수익률 (0, 5, 10 bps)
         net_returns = {}
@@ -310,10 +358,13 @@ class Backtester:
     
     def get_timeseries_df(self) -> pd.DataFrame:
         """시계열 데이터를 DataFrame으로 반환"""
+        if not self.history:
+            return pd.DataFrame()
+        
         df = pd.DataFrame(self.history)
         
         # weights 컬럼을 개별 종목 컬럼으로 분리
-        if len(self.history) > 0 and "weights" in self.history[0]:
+        if "weights" in self.history[0]:
             weights_df = pd.DataFrame(
                 df["weights"].tolist(),
                 columns=[f"weight_{sym}" for sym in self.dataset.symbols]
@@ -325,8 +376,9 @@ class Backtester:
     def save_timeseries_csv(self, filepath: Path) -> None:
         """시계열 데이터 CSV 저장"""
         df = self.get_timeseries_df()
-        df.to_csv(filepath, index=False, encoding="utf-8-sig")
-        print(f"📊 시계열 데이터 저장: {filepath}")
+        if not df.empty:
+            df.to_csv(filepath, index=False, encoding="utf-8-sig")
+            print(f"📊 시계열 데이터 저장: {filepath}")
     
     def save_metrics_json(self, filepath: Path, all_strategies: Dict = None) -> None:
         """집계 지표 JSON 저장"""
@@ -353,20 +405,16 @@ def create_metrics_summary_table(all_metrics: Dict) -> pd.DataFrame:
     rows = []
     
     for strategy, metrics in all_metrics.items():
+        if not metrics:
+            continue
+        
         row = {
-            "전략": strategy,
-            "누적수익률": f"{metrics.get('total_return', 0):.2f}%",
+            "Strategy": strategy,
+            "Cumulative Return": f"{metrics.get('total_return', 0):.2f}%",
             "CAGR": f"{metrics.get('cagr', 0):.2f}%",
-            "변동성": f"{metrics.get('volatility', 0):.2f}%",
             "MDD": f"{metrics.get('max_drawdown', 0):.2f}%",
+            "Avg Annual DD": f"{metrics.get('downside_deviation', 0):.2f}%",
             "Sharpe": f"{metrics.get('sharpe_ratio', 0):.2f}",
-            "Sortino": f"{metrics.get('sortino_ratio', 0):.2f}",
-            "Calmar": f"{metrics.get('calmar_ratio', 0):.2f}",
-            "VaR(95%)": f"{metrics.get('var_95', 0):.2f}%",
-            "CVaR(95%)": f"{metrics.get('cvar_95', 0):.2f}%",
-            "Info Ratio": f"{metrics.get('information_ratio', 0):.2f}",
-            "Avg Turnover": f"{metrics.get('avg_turnover', 0):.2f}%",
-            "총 거래비용": f"{metrics.get('total_transaction_cost', 0):,.0f}원",
         }
         rows.append(row)
     
