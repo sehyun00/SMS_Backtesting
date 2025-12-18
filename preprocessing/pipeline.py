@@ -1,12 +1,11 @@
 # 전체 파이프라인 통합
 
 import pandas as pd
-from .data_collector import DataCollector
-from .technical_indicators import TechnicalIndicators
-from .factor_calculator import FactorCalculator
-from .fama_french_loader import FamaFrenchLoader
-from .data_splitter import DataSplitter
-
+from data_collector import DataCollector
+from technical_indicators import TechnicalIndicators
+from factor_calculator import FactorCalculator
+from fama_french_loader import FamaFrenchLoader
+from data_splitter import DataSplitter
 
 
 class Pipeline:
@@ -17,7 +16,6 @@ class Pipeline:
         self.ff_loader = FamaFrenchLoader()
         self.start_year = 2006
         self.end_year = 2025
-        self.data_fetch_start_year = 2005
 
     def run(self):
         print("🚀 Starting Preprocessing Pipeline...")
@@ -25,8 +23,7 @@ class Pipeline:
         # 1. 종목 로드 및 생존 종목 필터링
         self.collector.load_stocks_from_csv(self.csv_path)
         survivor_stocks = self.collector.filter_survivor_stocks(
-            start_year=self.data_fetch_start_year,
-            end_year=self.end_year
+            start_year=self.start_year, end_year=self.end_year
         )
 
         if not survivor_stocks:
@@ -35,7 +32,7 @@ class Pipeline:
 
         # 2. Fama-French 데이터 미리 다운로드
         self.ff_loader.download_factors(
-            start_date=f"{self.data_fetch_start_year}-01-01", end_date=f"{self.end_year}-12-31"
+            start_date=f"{self.start_year}-01-01", end_date=f"{self.end_year}-12-31"
         )
 
         all_stocks_data = []
@@ -48,7 +45,7 @@ class Pipeline:
             # 3-1. OHLCV 데이터 수집
             df = self.collector.fetch_daily_data(
                 symbol,
-                start_date=f"{self.data_fetch_start_year}-01-01",
+                start_date=f"{self.start_year}-01-01",
                 end_date=f"{self.end_year}-12-31",
             )
 
@@ -67,8 +64,6 @@ class Pipeline:
             df["Industry"] = stock_info.get("Industry", "Unknown")
             df["Date"] = df.index  # 인덱스를 컬럼으로
 
-            # df = df[df['Date'] >= f"{self.start_year}-01-01"]
-
             all_stocks_data.append(df)
 
         if not all_stocks_data:
@@ -78,11 +73,6 @@ class Pipeline:
         # 4. 전체 데이터 병합
         full_df = pd.concat(all_stocks_data, ignore_index=True)
         print(f"📊 Total Records Collected: {len(full_df)}")
-
-        # 🔥 여기서 2006년 이후만 필터링 (Momentum/Volatility 계산 후)
-        full_df['Date'] = pd.to_datetime(full_df['Date'])
-        full_df = full_df[full_df['Date'] >= f"{self.start_year}-01-01"]
-        print(f"📊 Filtered Records (from {self.start_year}): {len(full_df)}")
 
         # 5. Fama-French 병합
         full_df = self.ff_loader.merge_with_stock_data(full_df)
@@ -136,3 +126,6 @@ if __name__ == "__main__":
     # 파이프라인 실행
     pipeline = Pipeline(csv_path=args.csv, output_dir=args.output)
     pipeline.run()
+
+
+
