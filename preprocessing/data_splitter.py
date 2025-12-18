@@ -5,79 +5,120 @@ import os
 
 
 class DataSplitter:
-    def __init__(self, df, stocks_info):
+    def __init__(self, train_df, test_df, train_stocks_info, test_stocks_info):
         """
+        🔥 수정: Train/Test DataFrame을 별도로 받음
+
         Args:
-            df: 전체 주식 데이터 (DataFrame)
-            stocks_info: 종목 정보 리스트 (List of Dicts: [{'Symbol': 'AAPL', 'Sector': 'Technology'}, ...])
+            train_df: Train 전체 데이터
+            test_df: Test 전체 데이터
+            train_stocks_info: Train 종목 정보 리스트
+            test_stocks_info: Test 종목 정보 리스트
         """
-        self.df = df
-        self.stocks_info = stocks_info
+        self.train_df = train_df
+        self.test_df = test_df
+        self.train_stocks_info = train_stocks_info
+        self.test_stocks_info = test_stocks_info
 
-    def split_by_sector_and_date(self, train_end_year=2020):
+    def split_by_sector(self, train_per_sector=5, test_total=7):
         """
-        섹터별로 1개는 학습용, 1개는 테스트용으로 분할합니다.
-        단, 모든 종목은 '생존 종목'이어야 합니다 (DataCollector에서 이미 필터링됨).
+        🔥 새 메서드: 섹터별 종목 선택
 
-        Rule:
-        - 학습 데이터: 2006 ~ train_end_year (섹터별 종목 A)
-        - 테스트 데이터: (train_end_year + 1) ~ 2025 (섹터별 종목 B)
+        Train: 섹터당 최대 N개 선택
+        Test: 총 M개 선택 (섹터 균형 고려)
+
+        Args:
+            train_per_sector: 섹터당 Train 종목 수
+            test_total: Test 총 종목 수
+
+        Returns:
+            train_df, test_df, train_symbols, test_symbols
         """
-        print("\n✂️ Splitting data by Sector and Date...")
+        print("\n✂️ Selecting stocks by sector...")
 
-        # DataFrame에 Sector 정보가 없다면 병합
-        if "Sector" not in self.df.columns:
-            sector_map = {s["Symbol"]: s["Sector"] for s in self.stocks_info}
-            self.df["Sector"] = self.df["Symbol"].map(sector_map)
+        # ============== Train 종목 선택 ==============
+        train_symbols_selected = []
+        train_sectors = self.train_df["Sector"].unique()
 
-        # 섹터별 종목 분류
-        sectors = self.df["Sector"].unique()
-        train_stocks = []
-        test_stocks = []
+        print(f"\n[Train Selection] 섹터당 최대 {train_per_sector}개")
+        for sector in sorted(train_sectors):
+            # 해당 섹터의 종목들
+            sector_symbols = self.train_df[self.train_df["Sector"] == sector][
+                "Symbol"
+            ].unique()
 
-        # 섹터별 대표 종목 선정
-        unique_symbols = self.df["Symbol"].unique()
+            # 데이터 품질 체크 (최소 1000행 이상)
+            valid_symbols = []
+            for sym in sector_symbols:
+                count = len(self.train_df[self.train_df["Symbol"] == sym])
+                if count >= 1000:  # 약 4년치
+                    valid_symbols.append(sym)
 
-        for sector in sectors:
-            # 현재 데이터에 존재하는 해당 섹터의 종목들 찾기
-            sector_symbols = [
-                s
-                for s in unique_symbols
-                if self.df[self.df["Symbol"] == s]["Sector"].iloc[0] == sector
-            ]
+            # 상위 N개 선택
+            selected = valid_symbols[:train_per_sector]
+            train_symbols_selected.extend(selected)
 
-            if len(sector_symbols) >= 2:
-                train_stocks.append(sector_symbols[0])  # 첫 번째 종목 -> 학습
-                test_stocks.append(sector_symbols[1])  # 두 번째 종목 -> 테스트
-                print(
-                    f"  Sector [{sector}]: Train={sector_symbols[0]}, Test={sector_symbols[1]}"
-                )
-            # ✅ 1개짜리 섹터는 제외 (삭제)
-            # elif len(sector_symbols) == 1:
-            #     train_stocks.append(sector_symbols[0])
-            #     print(f"  Sector [{sector}]: Train={sector_symbols[0]} (Only 1 survivor)")
-            else:
-                print(
-                    f"  ⚠️ Sector [{sector}]: 종목 수 부족 ({len(sector_symbols)}개), 제외"
-                )
+            print(f"   [{sector:30s}] {len(selected):2d}개 선택")
 
-        # 날짜 기준 분할
-        self.df["Date"] = pd.to_datetime(self.df["Date"])
-        split_date = f"{train_end_year}-12-31"
+        # ============== Test 종목 선택 ==============
+        test_symbols_selected = []
+        test_sectors = self.test_df["Sector"].unique()
 
-        # 학습 데이터 추출
-        train_df = self.df[
-            (self.df["Symbol"].isin(train_stocks)) & (self.df["Date"] <= split_date)
+        # 섹터당 할당 개수 계산
+        stocks_per_sector = max(1, test_total // len(test_sectors))
+
+        print(f"\n[Test Selection] 총 {test_total}개 (섹터당 약 {stocks_per_sector}개)")
+        for sector in sorted(test_sectors):
+            sector_symbols = self.test_df[self.test_df["Sector"] == sector][
+                "Symbol"
+            ].unique()
+
+            # 데이터 품질 체크
+            valid_symbols = []
+            for sym in sector_symbols:
+                count = len(self.test_df[self.test_df["Symbol"] == sym])
+                if count >= 600:  # 약 2.5년치
+                    valid_symbols.append(sym)
+
+            # 상위 N개 선택
+            selected = valid_symbols[:stocks_per_sector]
+            test_symbols_selected.extend(selected)
+
+            print(f"   [{sector:30s}] {len(selected):2d}개 선택")
+
+            # 목표 달성 시 중단
+            if len(test_symbols_selected) >= test_total:
+                break
+
+        # 정확히 test_total개 맞추기
+        test_symbols_selected = test_symbols_selected[:test_total]
+
+        # ============== DataFrame 필터링 ==============
+        final_train_df = self.train_df[
+            self.train_df["Symbol"].isin(train_symbols_selected)
         ].copy()
 
-        # 테스트 데이터 추출
-        test_df = self.df[
-            (self.df["Symbol"].isin(test_stocks)) & (self.df["Date"] > split_date)
+        final_test_df = self.test_df[
+            self.test_df["Symbol"].isin(test_symbols_selected)
         ].copy()
 
-        return train_df, test_df, train_stocks, test_stocks
+        print(f"\n✅ Final Selection:")
+        print(
+            f"   Train: {len(train_symbols_selected)}개 종목, {len(final_train_df):,}행"
+        )
+        print(
+            f"   Test:  {len(test_symbols_selected)}개 종목, {len(final_test_df):,}행"
+        )
+
+        return (
+            final_train_df,
+            final_test_df,
+            train_symbols_selected,
+            test_symbols_selected,
+        )
 
     def save_datasets(self, train_df, test_df, output_dir="."):
+        """CSV 저장"""
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
@@ -87,5 +128,5 @@ class DataSplitter:
         train_df.to_csv(train_path, index=False)
         test_df.to_csv(test_path, index=False)
 
-        print(f"\n💾 Saved Train Data: {train_path} ({len(train_df)} rows)")
-        print(f"💾 Saved Test Data: {test_path} ({len(test_df)} rows)")
+        print(f"\n💾 Saved: {train_path} ({len(train_df):,} rows)")
+        print(f"💾 Saved: {test_path} ({len(test_df):,} rows)")
