@@ -57,23 +57,53 @@ class HybridPortfolioEnv:
         returns = w["labels"]  # % 단위 (Momentum1M)
         features = w["features"]
 
+        # 🔥 1. Action 정규화 및 검증
+        action = np.array(action, dtype=np.float64)
+        action = np.nan_to_num(action, nan=0.0, posinf=0.0, neginf=0.0)
+        action = np.clip(action, 0, 1)
+        action_sum = np.sum(action)
+        if action_sum > 0:
+            action = action / action_sum
+        else:
+            action = np.ones(len(action)) / len(action)
+
+        # 🔥 2. Returns 처리 (nan = 상장폐지 = 0%)
+        returns = np.array(returns, dtype=np.float64)
+
+        # nan = 상장폐지/데이터 없음 = 0% (패턴 학습 가능)
+        returns = np.nan_to_num(
+            returns,
+            nan=0.0,  # 상장폐지 = 0% (TGNN 패턴 학습 가능)
+            posinf=0.5,  # 극단값 제한
+            neginf=-0.5,  # 극단값 제한
+        )
+
+        # 데이터 오류 대비 추가 안전장치
+        returns = np.clip(returns, -0.95, 2.0)
+
         # 포트폴리오 수익률 계산
-        portfolio_return = np.dot(action, returns)
+        portfolio_return = float(np.dot(action, returns))
+        portfolio_return = np.clip(portfolio_return, -0.8, 1.0)
 
         # 거래 비용
         turnover = np.sum(np.abs(action - self.prev_weights))
-
         cost = turnover * self.cost_bps  # 비율 단위 (0.0005 = 0.05%)
         net_return = portfolio_return - cost
+        net_return = np.clip(net_return, -0.8, 1.0)
 
-        # 포트폴리오 가치 업데이트
+        # 🔥 3. 포트폴리오 가치 업데이트
         self.portfolio_value *= 1 + net_return
+
+        # 안전장치: 최소값 보장 및 nan/inf 방지
+        self.portfolio_value = max(self.portfolio_value, 1000.0)
+        if np.isnan(self.portfolio_value) or np.isinf(self.portfolio_value):
+            self.portfolio_value = self.initial_cash
 
         self.current_step += 1
         done = self.current_step >= self.n_steps
         self.return_history.append(net_return)
 
-        # MDD 계산
+        # 🔥 4. MDD 계산 (전체 에피소드)
         if len(self.return_history) >= 12:
             cumulative_returns = np.cumprod(1 + np.array(self.return_history))
             peak = np.maximum.accumulate(cumulative_returns)
@@ -82,7 +112,7 @@ class HybridPortfolioEnv:
         else:
             self.current_mdd = 0.0
 
-        # 리워드 계산
+        # 🔥 5. 리워드 계산
         reward = self._calculate_reward(action, returns, features, net_return, turnover)
 
         self.prev_weights = action
@@ -93,6 +123,7 @@ class HybridPortfolioEnv:
             else np.zeros_like(self.dataset.get_state(self.windows, 0))
         )
 
+        # 🔥 6. Info 딕셔너리
         info = {
             "portfolio_value": self.portfolio_value,
             "return": net_return,

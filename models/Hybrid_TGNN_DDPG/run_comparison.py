@@ -349,6 +349,21 @@ class Trainer:
             if done:
                 break
 
+        # 🔥 추가: 디버깅
+        if episode < 3:
+            print(f"\n[DEBUG] Episode {episode + 1}:")
+            print(f"  Values count: {len(episode_values)}")
+            print(f"  First 5 values: {episode_values[:5]}")
+            print(f"  Last 5 values: {episode_values[-5:]}")
+            print(f"  Min value: {min(episode_values):.0f}")
+            print(f"  Max value: {max(episode_values):.0f}")
+
+            values_array = np.array(episode_values)
+            peak = np.maximum.accumulate(values_array)
+            drawdowns = (values_array - peak) / peak
+            print(f"  Min drawdown: {min(drawdowns):.4f}")
+            print(f"  MDD: {abs(min(drawdowns)) * 100:.2f}%\n")
+
         # 성과 계산
         metrics = self._calculate_episode_metrics(episode_returns, episode_values)
         metrics["reward"] = episode_reward
