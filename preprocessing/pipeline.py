@@ -1,11 +1,11 @@
 # 전체 파이프라인 통합
 
 import pandas as pd
-from data_collector import DataCollector
-from technical_indicators import TechnicalIndicators
-from factor_calculator import FactorCalculator
-from fama_french_loader import FamaFrenchLoader
-from data_splitter import DataSplitter
+from .data_collector import DataCollector
+from .technical_indicators import TechnicalIndicators
+from .factor_calculator import FactorCalculator
+from .fama_french_loader import FamaFrenchLoader
+from .data_splitter import DataSplitter
 
 
 class Pipeline:

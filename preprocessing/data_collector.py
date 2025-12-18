@@ -19,29 +19,12 @@ class DataCollector:
             raise FileNotFoundError(f"File not found: {file_path}")
 
         df = pd.read_csv(file_path)
-<<<<<<< HEAD
-    
-        # 컬럼 이름 매핑 (Symbol이나 Ticker 혼용 대응)
-        if 'Ticker' in df.columns:
-            df = df.rename(columns={'Ticker': 'Symbol'})
-    
-        # 🔥 industry (소문자) -> Industry (대문자) 변환
-        if 'industry' in df.columns and 'Industry' not in df.columns:
-            df = df.rename(columns={'industry': 'Industry'})
-    
-        # 🔥 Industry 컬럼이 없으면 'Unknown'으로 채우기
-        if 'Industry' not in df.columns:
-            df['Industry'] = 'Unknown'
-    
-        required_cols = ['Symbol', 'Sector']
-=======
 
         # 컬럼 이름 매핑 (Symbol이나 Ticker 혼용 대응)
         if "Ticker" in df.columns:
             df = df.rename(columns={"Ticker": "Symbol"})
 
         required_cols = ["Symbol", "Sector"]
->>>>>>> feat/models/Hybrid_TGNN_DDPG_refactor
         if not all(col in df.columns for col in required_cols):
             raise ValueError(f"CSV must contain columns: {required_cols}")
 
@@ -111,13 +94,8 @@ class DataCollector:
         특정 종목의 일별 OHLCV 데이터를 가져옵니다.
         """
         try:
-<<<<<<< HEAD
-            df = yf.download(symbol, start=start_date, end=end_date, progress=False, auto_adjust=True)
-            
-=======
             df = yf.download(symbol, start=start_date, end=end_date, progress=False)
 
->>>>>>> feat/models/Hybrid_TGNN_DDPG_refactor
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
 
