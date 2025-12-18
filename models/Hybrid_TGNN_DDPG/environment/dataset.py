@@ -107,23 +107,24 @@ class HybridDataset:
             adj: (N, N) 인접 행렬
         """
         n = len(symbols)
-        corr_matrix = np.eye(n)
 
-        # 상관계수 계산
-        for i, sym1 in enumerate(symbols):
-            data1 = snapshot_df[snapshot_df["Symbol"] == sym1][
-                self.feature_cols
-            ].values.flatten()
-            for j, sym2 in enumerate(symbols):
-                if i >= j:
-                    continue
-                data2 = snapshot_df[snapshot_df["Symbol"] == sym2][
-                    self.feature_cols
-                ].values.flatten()
-                if len(data1) > 0 and len(data2) > 0:
-                    corr = np.corrcoef(data1, data2)[0, 1]
-                    corr_matrix[i, j] = corr
-                    corr_matrix[j, i] = corr
+        # 🔥 최적화: 한 번에 모든 데이터 추출
+        feature_data = []
+        for sym in symbols:
+            data = snapshot_df[snapshot_df["Symbol"] == sym][self.feature_cols].values
+            if len(data) > 0:
+                feature_data.append(data.flatten())
+            else:
+                feature_data.append(np.zeros(len(self.feature_cols)))
+
+        feature_matrix = np.array(feature_data)  # (N, features)
+
+        # 🔥 최적화: 벡터화된 상관계수 계산
+        if feature_matrix.shape[0] > 1:
+            corr_matrix = np.corrcoef(feature_matrix)
+            corr_matrix = np.nan_to_num(corr_matrix, nan=0.0)
+        else:
+            corr_matrix = np.eye(n)
 
         # 산업 유사도 반영
         if "Sector" in snapshot_df.columns:
@@ -168,7 +169,14 @@ class HybridDataset:
         dates = sorted(monthly_df["Date"].unique())
         windows = []
 
+        total_windows = len(dates) - self.window_size
+        print(f"   🔄 Creating {total_windows} windows...")
+
         for i in range(len(dates) - self.window_size):
+            if i % max(1, total_windows // 10) == 0:
+                print(
+                    f"      Progress: {i}/{total_windows} ({i * 100 // total_windows}%)"
+                )
             window_dates = dates[i : i + self.window_size]
             target_date = window_dates[-1]
             next_date = dates[i + self.window_size]
@@ -207,9 +215,6 @@ class HybridDataset:
             for symbol in symbols:
                 val = next_df[next_df["Symbol"] == symbol]["ReturnRaw"].values
                 labels.append(val[0] if len(val) > 0 else 0.0)
-
-            if i < 5:  # 처음 5개 윈도우만 출력
-                print(f"Window {i} ({target_date}): labels = {labels}")
 
             windows.append(
                 {

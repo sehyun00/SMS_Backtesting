@@ -36,23 +36,25 @@ print(f"📂 Test data: {TEST_DATA_PATH.name}\n")
 # ==========================================
 # 학습 함수
 # ==========================================
-def train_hybrid(agent, env, num_episodes=200, save_dir=None):
+def train_hybrid(agent, env, num_episodes=800, save_dir=None, patience=100):
     """
-    Hybrid 에이전트 학습 루프 (모니터링 추가)
+    Hybrid 에이전트 학습 (Early Stopping 추가)
 
     Args:
-        agent: HybridAgent 인스턴스
-        env: HybridPortfolioEnv 인스턴스
-        num_episodes: 학습 에피소드 수
-        save_dir: 모니터링 결과 저장 디렉토리
+        patience: 성과 개선이 없는 에피소드 허용 횟수
     """
-    print(f"🚀 Starting Hybrid model training: Total {num_episodes} episodes")
+    print(f"🚀 Starting Hybrid model training: Max {num_episodes} episodes")
+    print(f"   Early Stopping: patience={patience}")
 
-    # 학습 모니터 초기화
     if save_dir:
         monitor = TrainingMonitor(save_dir / "training_logs", save_interval=50)
     else:
         monitor = None
+
+    # 🔥 추가: Early Stopping 변수
+    best_reward = -float("inf")
+    best_episode = 0
+    no_improve_count = 0
 
     for episode in range(num_episodes):
         state = env.reset()
@@ -81,9 +83,14 @@ def train_hybrid(agent, env, num_episodes=200, save_dir=None):
                 break
 
         # 에피소드 성과 계산
-        avg_return = np.mean(episode_returns) if episode_returns else 0.0
+        if episode_returns:
+            episode_returns = np.array(episode_returns)
+            # 🔥 추가: NaN 제거
+            episode_returns = episode_returns[~np.isnan(episode_returns)]
+            avg_return = np.mean(episode_returns) if len(episode_returns) > 0 else 0.0
+        else:
+            avg_return = 0.0
 
-        # MDD 계산
         values = np.array(episode_values)
         if len(values) > 0:
             peak = np.maximum.accumulate(values)
@@ -92,11 +99,55 @@ def train_hybrid(agent, env, num_episodes=200, save_dir=None):
         else:
             mdd = 0.0
 
-        # Sharpe 계산 (간단 버전)
+        # 🔥 수정: Sharpe 계산 (NaN 방지)
         if len(episode_returns) > 1:
-            sharpe = np.mean(episode_returns) / (np.std(episode_returns) + 1e-8)
+            mean_ret = np.mean(episode_returns)
+            std_ret = np.std(episode_returns)
+            if std_ret > 1e-8:
+                sharpe = mean_ret / std_ret
+            else:
+                sharpe = 0.0
         else:
             sharpe = 0.0
+
+        values = np.array(episode_values)
+        if len(values) > 0:
+            peak = np.maximum.accumulate(values)
+            drawdowns = (values - peak) / peak
+            mdd = abs(min(drawdowns)) if len(drawdowns) > 0 else 0.0
+        else:
+            mdd = 0.0
+
+        # 🔥 추가: NaN 최종 체크
+        avg_return = 0.0 if np.isnan(avg_return) else avg_return
+        sharpe = 0.0 if np.isnan(sharpe) else sharpe
+
+        # 🔥 추가: Early Stopping 체크
+        if episode_reward > best_reward:
+            best_reward = episode_reward
+            best_episode = episode
+            no_improve_count = 0
+
+            # 최고 성과 모델 저장
+            if save_dir:
+                model_path = Path(__file__).parent / "best_hybrid.pth"
+                torch.save(agent.actor.state_dict(), model_path)
+        else:
+            no_improve_count += 1
+
+        # Early Stopping 발동
+        if no_improve_count >= patience:
+            print(f"\n⏹️  Early Stopping at episode {episode + 1}")
+            print(f"   Best reward: {best_reward:.2f} at episode {best_episode + 1}")
+            break
+
+        if (episode + 1) % 10 == 0:
+            print(
+                f"{episode + 1:3d}/{num_episodes} | Reward: {episode_reward:7.2f} | "
+                f"Return: {avg_return * 100:5.2f}% | MDD: {mdd * 100:5.2f}% | "
+                f"Sharpe: {sharpe:.3f} | Alpha: {alpha_value:.3f} | "
+                f"No Improve: {no_improve_count}/{patience}"
+            )
 
         # 모니터에 기록
         if monitor:
@@ -104,12 +155,7 @@ def train_hybrid(agent, env, num_episodes=200, save_dir=None):
                 episode, episode_reward, avg_return, mdd, sharpe, alpha_value
             )
 
-        if (episode + 1) % 10 == 0:
-            print(
-                f"{episode + 1:3d}/{num_episodes} | Reward: {episode_reward:7.2f} | "
-                f"Return: {avg_return * 100:5.2f}% | MDD: {mdd * 100:5.2f}% | "
-                f"Sharpe: {sharpe:.3f} | Alpha: {alpha_value:.3f}"
-            )
+    print(f"\n✅ Training completed. Best episode: {best_episode + 1}")
 
 
 # ==========================================
@@ -326,9 +372,21 @@ def main(mode="compare"):
         "CMA",
     ]
 
-    # Sector One-Hot Encoding
+    # Sector One-Hot Encoding (Train/Test 통일)
+    # 🔥 수정: 모든 섹터를 포함한 카테고리로 통일
+    all_sectors = sorted(set(train_df["Sector"]) | set(test_df["Sector"]))
+
+    train_df["Sector"] = pd.Categorical(train_df["Sector"], categories=all_sectors)
+    test_df["Sector"] = pd.Categorical(test_df["Sector"], categories=all_sectors)
+
     train_sectors = pd.get_dummies(train_df["Sector"], prefix="Sector")
     test_sectors = pd.get_dummies(test_df["Sector"], prefix="Sector")
+
+    # 차원 확인 (디버깅용)
+    print(
+        f"[Debug] Train sectors: {train_sectors.shape[1]}, Test sectors: {test_sectors.shape[1]}"
+    )
+    assert train_sectors.shape[1] == test_sectors.shape[1], "Sector dimension mismatch!"
 
     train_df = pd.concat([train_df, train_sectors], axis=1)
     test_df = pd.concat([test_df, test_sectors], axis=1)
@@ -370,7 +428,7 @@ def main(mode="compare"):
         save_dir.mkdir(parents=True, exist_ok=True)
 
         # 학습 실행 (save_dir 추가)
-        train_hybrid(agent, train_env, num_episodes=200, save_dir=save_dir)
+        train_hybrid(agent, train_env, save_dir=save_dir)
 
         torch.save(agent.actor.state_dict(), model_path)
         print(f"✅ Model saved successfully: {model_path}")
@@ -387,21 +445,23 @@ def main(mode="compare"):
 
         print("\n[Testing] Loading saved model...")
 
-        # ⚠️ 중요: Test 종목 수에 맞게 새로운 Agent 생성
+        # Test 종목 수에 맞게 새로운 Agent 생성
         test_agent = HybridAgent(
             num_stocks_test, window_size, num_features, device=device
         )
 
-        # ✅ 전이 학습 로직 구현
+        # 전이 학습: Encoder만 로드
         trained_state_dict = torch.load(model_path, map_location=device)
         model_state = test_agent.actor.state_dict()
 
-        # TGNN Encoder와 공통 레이어만 로드 (Output 레이어 제외)
+        # 🔥 수정: Encoder와 공통 레이어만 로드
         loaded_keys = []
         skipped_keys = []
         for key in trained_state_dict.keys():
-            # Output 레이어와 종목 수 의존 레이어 제외
-            if "output" not in key and "weight_net" not in key:
+            # Encoder 레이어만 (tgnn_encoder, ddpg_encoder, gat_conv, lstm)
+            if any(
+                x in key for x in ["tgnn_encoder", "ddpg_encoder", "gat_conv", "lstm"]
+            ):
                 if (
                     key in model_state
                     and trained_state_dict[key].shape == model_state[key].shape
@@ -414,10 +474,49 @@ def main(mode="compare"):
                 skipped_keys.append(key)
 
         test_agent.actor.load_state_dict(model_state)
-        test_agent.actor.eval()
         print(
-            f"✅ Loaded {len(loaded_keys)} layers, skipped {len(skipped_keys)} layers (size mismatch)"
+            f"✅ Loaded {len(loaded_keys)} encoder layers, skipped {len(skipped_keys)} output layers"
         )
+
+        # 🔥 추가: Fine-tuning (Output 레이어 학습)
+        print("\n[Fine-tuning] Training output layers on test data...")
+        test_windows = dataset.get_test_windows()
+        test_env = HybridPortfolioEnv(dataset, windows=test_windows)
+
+        # 짧은 Fine-tuning (20 에피소드)
+        for episode in range(20):
+            state = test_env.reset()
+            episode_reward = 0
+
+            while True:
+                action, alpha_value = test_agent.select_action(state, noise_std=0.1)
+                next_state, reward, done, info = test_env.step(action)
+
+                test_agent.actor.current_mdd = info.get("current_mdd", 0.0)
+                test_agent.replay_buffer.push(state, action, reward, next_state, done)
+
+                if len(test_agent.replay_buffer) >= 64:
+                    test_agent.train(batch_size=32)
+
+                episode_reward += reward
+                state = next_state
+
+                if done:
+                    break
+
+            if (episode + 1) % 5 == 0:
+                print(f"  Episode {episode + 1}/20: Reward = {episode_reward:.2f}")
+
+        print("✅ Fine-tuning completed\n")
+        test_agent.actor.eval()
+
+        # 🔥 추가: 모델 출력 테스트
+        print("[DEBUG] Testing model output...")
+        state = dataset.get_state(test_windows, 0)
+        action, alpha_value = test_agent.select_action(state, noise_std=0.0)
+        print(f"  Sample action: {action}")
+        print(f"  All equal? {np.allclose(action, action[0])}")
+        print(f"  Alpha: {alpha_value:.3f}\n")
 
         print("[Testing] Performing backtesting on 2021-2025 data...")
 

@@ -116,89 +116,88 @@ class HybridPortfolioEnv:
 
     def _calculate_reward(self, action, returns, features, net_return, turnover):
         """
-        복합 리워드 계산
+        단순화된 리워드 계산 (NaN 방지)
 
-        포함 요소:
-        - 수익률
-        - 샤프 비율
-        - 하방 리스크
-        - MDD 페널티
-        - 변동성 페널티
-        - 집중도 페널티
-        - 다양성 보너스
-        - 회전율 페널티
-        - 5-Factor 보너스
+        Args:
+            action: 포트폴리오 가중치
+            returns: 종목별 수익률
+            features: 특성 데이터
+            net_return: 순수익률
+            turnover: 회전율
+
+        Returns:
+            reward: 보상값
         """
+        # 🔥 입력 검증 및 정규화
+        action = np.nan_to_num(action, nan=0.0, posinf=0.0, neginf=0.0)
+        action = np.clip(action, 0, 1)
+        action_sum = np.sum(action)
+        if action_sum > 0:
+            action = action / action_sum
+        else:
+            action = np.ones(len(action)) / len(action)
+
+        returns = np.nan_to_num(returns, nan=0.0, posinf=1.0, neginf=-1.0)
+        net_return = np.clip(net_return, -1.0, 1.0)
+
+        # 초기 단계: 단순 리워드
         if len(self.return_history) < 6:
-            return net_return * 10 - turnover * 5.0
+            reward = net_return * 100 - turnover * 10.0
+            return np.clip(reward, -100, 100)
 
+        # 최근 수익률 배열
         returns_array = np.array(self.return_history[-12:])
+        returns_array = np.nan_to_num(returns_array, nan=0.0)
+
         mean_return = np.mean(returns_array)
+        std_return = np.std(returns_array) + 1e-8
 
-        # 하방 리스크
-        downside_std = self._calculate_downside_std()
+        # ========== 1. 수익률 보상 ==========
+        return_reward = mean_return * 50.0
 
-        # 기타 메트릭
+        # ========== 2. 샤프 비율 보상 ==========
+        sharpe = mean_return / std_return
+        sharpe = np.clip(sharpe, -5, 5)
+        sharpe_reward = sharpe * 20.0
+
+        # ========== 3. MDD 페널티 ==========
+        if len(returns_array) >= 12:
+            cumulative = np.cumprod(1 + returns_array)
+            peak = np.maximum.accumulate(cumulative)
+            drawdown = (cumulative - peak) / (peak + 1e-8)
+            mdd = abs(np.min(drawdown))
+
+            if mdd > 0.20:
+                mdd_penalty = 100.0 * (mdd - 0.20) ** 2
+            else:
+                mdd_penalty = 0
+        else:
+            mdd_penalty = 0
+
+        # ========== 4. 집중도 페널티 ==========
         concentration = np.sum(action**2)
-        volatility = np.std(returns_array)
+        if concentration > 0.15:
+            concentration_penalty = 200.0 * (concentration - 0.15) ** 2
+        else:
+            concentration_penalty = 0
 
-        # 5-Factor 추출
-        mkt_rf = features[:, -1, -5] * 100
-        smb = features[:, -1, -4] * 100
-        hml = features[:, -1, -3] * 100
-        rmw = features[:, -1, -2] * 100
-        cma = features[:, -1, -1] * 100
+        # ========== 5. 회전율 페널티 ==========
+        turnover_penalty = turnover * 5.0
 
-        # NaN 제거
-        mkt_rf = np.nan_to_num(mkt_rf, nan=0.0, posinf=10.0, neginf=-10.0)
-        smb = np.nan_to_num(smb, nan=0.0, posinf=10.0, neginf=-10.0)
-        hml = np.nan_to_num(hml, nan=0.0, posinf=10.0, neginf=-10.0)
-        rmw = np.nan_to_num(rmw, nan=0.0, posinf=10.0, neginf=-10.0)
-        cma = np.nan_to_num(cma, nan=0.0, posinf=10.0, neginf=-10.0)
-
-        # 기본 리워드
-        return_reward = mean_return * 5.0
-        risk_adjusted_return = mean_return / (volatility + 1e-8)
-        sharpe_bonus = risk_adjusted_return * 3.0
-        downside_penalty = 5.0 * downside_std
-
-        # MDD 페널티
-        mdd_penalty, recovery_bonus = self._calculate_mdd_penalty()
-
-        # 변동성 페널티
-        volatility_penalty = self._calculate_volatility_penalty(volatility)
-
-        # 집중도 페널티
-        concentration_penalty = self._calculate_concentration_penalty(concentration)
-
-        # 다양성 보너스
-        diversity_bonus = self._calculate_diversity_bonus(action)
-
-        # 회전율 페널티
-        turnover_penalty = self._calculate_turnover_penalty(turnover)
-
-        # 5-Factor 리워드
-        factor_bonus = self._calculate_factor_bonus(action, mkt_rf, hml, rmw, smb, cma)
-
-        # 최종 리워드
+        # ========== 최종 리워드 ==========
         reward = (
             return_reward
-            + sharpe_bonus
-            - downside_penalty
-            + factor_bonus
+            + sharpe_reward
             - mdd_penalty
-            - volatility_penalty
             - concentration_penalty
-            + diversity_bonus
             - turnover_penalty
-            + recovery_bonus
         )
 
-        # NaN 체크
-        if np.isnan(reward) or np.isinf(reward):
-            reward = net_return * 10 - turnover * 5.0
+        # 🔥 최종 검증
+        reward = np.nan_to_num(reward, nan=0.0, posinf=100.0, neginf=-100.0)
+        reward = np.clip(reward, -100, 100)
 
-        return reward
+        return float(reward)
 
     def _calculate_mdd_penalty(self):
         """MDD 페널티 및 회복 보너스"""
