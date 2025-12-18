@@ -23,8 +23,8 @@ class HybridActor(nn.Module):
         self.num_features = num_features
 
         # 제약 파라미터
-        self.MIN_WEIGHT = 0.05  # 5% 최소 비중
-        self.MAX_WEIGHT = 0.20  # 20% 최대 비중
+        self.MIN_WEIGHT = 0.0  # 0% 최소 비중
+        self.MAX_WEIGHT = 0.25  # 25% 최대 비중
 
         # 동적 제약을 위한 기본값 저장
         self.BASE_MIN_WEIGHT = 0.05

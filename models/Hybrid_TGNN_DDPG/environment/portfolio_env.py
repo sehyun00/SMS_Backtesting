@@ -75,7 +75,7 @@ class HybridPortfolioEnv:
 
         # MDD 계산
         if len(self.return_history) >= 12:
-            cumulative_returns = np.cumprod(1 + np.array(self.return_history[-12:]))
+            cumulative_returns = np.cumprod(1 + np.array(self.return_history))
             peak = np.maximum.accumulate(cumulative_returns)
             drawdowns = (cumulative_returns - peak) / peak
             self.current_mdd = abs(min(drawdowns))
