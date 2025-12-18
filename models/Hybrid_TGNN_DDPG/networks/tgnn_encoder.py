@@ -5,7 +5,7 @@ TGNN Encoder Module
 
 import torch
 import torch.nn as nn
-from .graph_layers import GraphConvLayer, TemporalAttention
+from networks.graph_layers import GraphConvLayer, TemporalAttention
 
 
 class TGNNEncoder(nn.Module):

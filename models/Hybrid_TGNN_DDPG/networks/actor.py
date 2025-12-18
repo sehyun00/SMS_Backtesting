@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from .tgnn_encoder import TGNNEncoder
+from networks.tgnn_encoder import TGNNEncoder
 
 
 class HybridActor(nn.Module):

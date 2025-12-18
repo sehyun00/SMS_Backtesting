@@ -58,16 +58,16 @@ class HybridPortfolioEnv:
         features = w["features"]
 
         # 포트폴리오 수익률 계산
-        portfolio_return_pct = np.dot(action, returns)  # % 단위
+        portfolio_return = np.dot(action, returns)
 
         # 거래 비용
         turnover = np.sum(np.abs(action - self.prev_weights))
-        cost = turnover * self.cost_bps * 100  # bp → % 변환
 
-        net_return = portfolio_return_pct - cost
+        cost = turnover * self.cost_bps  # 비율 단위 (0.0005 = 0.05%)
+        net_return = portfolio_return - cost
 
         # 포트폴리오 가치 업데이트
-        self.portfolio_value *= 1 + net_return / 100
+        self.portfolio_value *= 1 + net_return
 
         self.current_step += 1
         done = self.current_step >= self.n_steps
@@ -75,9 +75,7 @@ class HybridPortfolioEnv:
 
         # MDD 계산
         if len(self.return_history) >= 12:
-            cumulative_returns = np.cumprod(
-                1 + np.array(self.return_history[-12:]) / 100
-            )
+            cumulative_returns = np.cumprod(1 + np.array(self.return_history[-12:]))
             peak = np.maximum.accumulate(cumulative_returns)
             drawdowns = (cumulative_returns - peak) / peak
             self.current_mdd = abs(min(drawdowns))
@@ -97,6 +95,7 @@ class HybridPortfolioEnv:
 
         info = {
             "portfolio_value": self.portfolio_value,
+            "return": net_return,
             "date": w["date"],
             "turnover": turnover,
             "cost": cost,
@@ -206,7 +205,7 @@ class HybridPortfolioEnv:
         if len(self.return_history) < 12:
             return 0, 0
 
-        cumulative_returns = np.cumprod(1 + np.array(self.return_history[-12:]) / 100)
+        cumulative_returns = np.cumprod(1 + np.array(self.return_history[-12:]))
         peak = np.maximum.accumulate(cumulative_returns)
         drawdowns = (cumulative_returns - peak) / peak
         current_mdd = abs(min(drawdowns))

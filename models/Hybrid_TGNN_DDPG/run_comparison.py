@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 from pathlib import Path
 import matplotlib
+from training_monitor import TrainingMonitor
 
 matplotlib.use("Agg")
 import warnings
@@ -35,20 +36,29 @@ print(f"📂 Test data: {TEST_DATA_PATH.name}\n")
 # ==========================================
 # 학습 함수
 # ==========================================
-def train_hybrid(agent, env, num_episodes=200):
+def train_hybrid(agent, env, num_episodes=200, save_dir=None):
     """
-    Hybrid 에이전트 학습 루프
+    Hybrid 에이전트 학습 루프 (모니터링 추가)
 
     Args:
         agent: HybridAgent 인스턴스
         env: HybridPortfolioEnv 인스턴스
         num_episodes: 학습 에피소드 수
+        save_dir: 모니터링 결과 저장 디렉토리
     """
     print(f"🚀 Starting Hybrid model training: Total {num_episodes} episodes")
+
+    # 학습 모니터 초기화
+    if save_dir:
+        monitor = TrainingMonitor(save_dir / "training_logs", save_interval=50)
+    else:
+        monitor = None
 
     for episode in range(num_episodes):
         state = env.reset()
         episode_reward = 0
+        episode_returns = []
+        episode_values = []
         noise_std = max(0.01, 0.2 - episode * 0.002)
 
         while True:
@@ -62,15 +72,43 @@ def train_hybrid(agent, env, num_episodes=200):
                 agent.train(batch_size=64)
 
             episode_reward += reward
+            episode_returns.append(info.get("return", 0.0))
+            episode_values.append(info.get("portfolio_value", 1000000))
+
             state = next_state
 
             if done:
                 break
 
+        # 에피소드 성과 계산
+        avg_return = np.mean(episode_returns) if episode_returns else 0.0
+
+        # MDD 계산
+        values = np.array(episode_values)
+        if len(values) > 0:
+            peak = np.maximum.accumulate(values)
+            drawdowns = (values - peak) / peak
+            mdd = abs(min(drawdowns)) if len(drawdowns) > 0 else 0.0
+        else:
+            mdd = 0.0
+
+        # Sharpe 계산 (간단 버전)
+        if len(episode_returns) > 1:
+            sharpe = np.mean(episode_returns) / (np.std(episode_returns) + 1e-8)
+        else:
+            sharpe = 0.0
+
+        # 모니터에 기록
+        if monitor:
+            monitor.record_episode(
+                episode, episode_reward, avg_return, mdd, sharpe, alpha_value
+            )
+
         if (episode + 1) % 10 == 0:
             print(
                 f"{episode + 1:3d}/{num_episodes} | Reward: {episode_reward:7.2f} | "
-                f"Noise: {noise_std:.3f} | Alpha: {alpha_value:.3f}"
+                f"Return: {avg_return * 100:5.2f}% | MDD: {mdd * 100:5.2f}% | "
+                f"Sharpe: {sharpe:.3f} | Alpha: {alpha_value:.3f}"
             )
 
 
@@ -152,7 +190,7 @@ def run_hybrid_rebalancing(agent, dataset, freq="monthly"):
 
         # 수익률 계산
         ret = np.dot(current_weights, w["labels"])
-        capital *= 1 + ret / 100
+        capital *= 1 + ret
         portfolio_history.append(capital)
         peak = max(peak, capital)
         dd = (capital - peak) / peak
@@ -212,7 +250,17 @@ def run_fixed_weights(dataset, strategy_name="1/N Buy & Hold"):
             trade_logs.append(log)
 
         ret = np.dot(current_weights, w["labels"])
-        capital *= 1 + ret / 100
+        ret = float(ret)  # ✅ 명시적으로 float 변환
+        capital *= 1.0 + ret
+
+        if i < 3:
+            print(
+                f"[DEBUG] Month {i}: ret={ret:.4f}, capital before={capital:.0f}",
+                end="",
+            )
+        if i < 3:
+            print(f", after={capital:.0f}")
+
         peak = max(peak, capital)
         dd = (capital - peak) / peak
 
@@ -278,6 +326,15 @@ def main(mode="compare"):
         "CMA",
     ]
 
+    # Sector One-Hot Encoding
+    train_sectors = pd.get_dummies(train_df["Sector"], prefix="Sector")
+    test_sectors = pd.get_dummies(test_df["Sector"], prefix="Sector")
+
+    train_df = pd.concat([train_df, train_sectors], axis=1)
+    test_df = pd.concat([test_df, test_sectors], axis=1)
+
+    feature_cols.extend(train_sectors.columns.tolist())
+
     print("[Initialization] Preparing Hybrid dataset...")
     dataset = HybridDataset(
         train_df, test_df, window_size=12, feature_cols=feature_cols
@@ -307,13 +364,21 @@ def main(mode="compare"):
 
         train_windows = dataset.get_train_windows()
         train_env = HybridPortfolioEnv(dataset, windows=train_windows)
-        train_hybrid(agent, train_env, num_episodes=200)
+
+        # 저장 디렉토리 설정
+        save_dir = ROOT_DIR / "results" / "03_Hybrid_TGNN_DDPG"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # 학습 실행 (save_dir 추가)
+        train_hybrid(agent, train_env, num_episodes=200, save_dir=save_dir)
 
         torch.save(agent.actor.state_dict(), model_path)
         print(f"✅ Model saved successfully: {model_path}")
         return
 
     elif mode == "compare":
+        print(f"\n🔍 Debug: model_path = {model_path}")
+        print(f"🔍 Debug: exists = {model_path.exists()}")
         if not model_path.exists():
             print(
                 "❌ No trained model found. Please run: python run_comparison.py train"
@@ -327,9 +392,32 @@ def main(mode="compare"):
             num_stocks_test, window_size, num_features, device=device
         )
 
-        # Train된 가중치 로드 시도 (호환되는 부분만)
-        print("⚠️  Warning: Train/Test 종목 수가 다릅니다. 전이 학습을 시도합니다...")
-        # TODO: 전이 학습 로직 구현 필요
+        # ✅ 전이 학습 로직 구현
+        trained_state_dict = torch.load(model_path, map_location=device)
+        model_state = test_agent.actor.state_dict()
+
+        # TGNN Encoder와 공통 레이어만 로드 (Output 레이어 제외)
+        loaded_keys = []
+        skipped_keys = []
+        for key in trained_state_dict.keys():
+            # Output 레이어와 종목 수 의존 레이어 제외
+            if "output" not in key and "weight_net" not in key:
+                if (
+                    key in model_state
+                    and trained_state_dict[key].shape == model_state[key].shape
+                ):
+                    model_state[key] = trained_state_dict[key]
+                    loaded_keys.append(key)
+                else:
+                    skipped_keys.append(key)
+            else:
+                skipped_keys.append(key)
+
+        test_agent.actor.load_state_dict(model_state)
+        test_agent.actor.eval()
+        print(
+            f"✅ Loaded {len(loaded_keys)} layers, skipped {len(skipped_keys)} layers (size mismatch)"
+        )
 
         print("[Testing] Performing backtesting on 2021-2025 data...")
 

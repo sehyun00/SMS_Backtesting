@@ -6,8 +6,8 @@ TGNN과 DDPG를 결합한 강화학습 에이전트
 import torch
 import torch.nn as nn
 import numpy as np
-from .replay_buffer import ReplayBuffer
-from ..networks import HybridActor, HybridCritic
+from agent.replay_buffer import ReplayBuffer
+from networks import HybridActor, HybridCritic
 
 
 class HybridAgent:
