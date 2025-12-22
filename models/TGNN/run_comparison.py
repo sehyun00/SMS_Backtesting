@@ -1,5 +1,5 @@
 """
-Multi-Output TGNN 학습 & 리밸런싱 빈도별 백테스팅 비교
+TGNN 학습 & 리밸런싱 빈도별 백테스팅 비교
 - 하나의 모델이 Momentum 1M/3M/6M/12M 모두 예측
 - 백테스팅 시 리밸런싱 주기에 맞는 헤드 선택
 """
@@ -27,7 +27,7 @@ except ImportError:
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 TRAIN_DATA_PATH = ROOT_DIR / "data" / "train_data.csv"
 TEST_DATA_PATH = ROOT_DIR / "data" / "test_data.csv"
-RESULTS_DIR = ROOT_DIR / "results" / "TGNN_MultiOutput"
+RESULTS_DIR = ROOT_DIR / "results" / "01_TGNN_Only"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # 한글 폰트
@@ -36,13 +36,13 @@ font_name = "Malgun Gothic" if platform.system() == "Windows" else "AppleGothic"
 plt.rcParams["font.family"] = font_name
 plt.rcParams["axes.unicode_minus"] = False
 
-# ============ Multi-Output TGNN Dataset ============
+# ============ TGNN Dataset ============
 
-class MultiOutputDataset(TGNNDataset):
-    """Multi-Output 학습을 위한 Dataset (모든 Momentum 라벨 포함)"""
+class TGNN_Dataset(TGNNDataset):
+    """TGNN 학습을 위한 Dataset"""
     
     def _create_windows(self):
-        """윈도우 생성 (모든 Momentum 타겟 포함)"""
+        """윈도우 생성"""
         dates = sorted(self.monthly_df["Date"].unique())
         windows = []
 
@@ -122,13 +122,13 @@ class MultiOutputDataset(TGNNDataset):
             "active_mask": torch.BoolTensor(w["active_mask"]),
         }
 
-# ============ Multi-Output TGNN Model ============
+# ============ TGNN Model ============
 
 import torch.nn as nn
 import torch.nn.functional as F
 
-class MultiOutputTGNN(TGNNModel):
-    """Multi-Output TGNN: 4개의 독립적인 예측 헤드"""
+class TGNNModel(TGNNModel):
+    """TGNN: 4개의 독립적인 예측 헤드"""
     
     def __init__(self, num_features, hidden_dims=[128, 128, 64], num_heads=8, num_stocks=10):
         # 부모 클래스 초기화 (predictor 제외)
@@ -281,9 +281,13 @@ def plot_performance(strategies, save_dir):
         vals = df['cumulative_return']
         plt.plot(dates, vals, label=name, linewidth=2)
         
-    plt.title("Performance Comparison: Multi-Output TGNN", fontsize=14, fontweight='bold')
+    plt.title("Performance Comparison: TGNN", fontsize=14, fontweight='bold')
     plt.xlabel("Date", fontsize=12)
     plt.ylabel("Cumulative Return (%)", fontsize=12)
+    
+    # 🔥 x축 범위를 2022년 1월부터 시작하도록 설정
+    plt.xlim(left=pd.Timestamp('2022-01-01'))
+    
     plt.grid(True, alpha=0.3)
     plt.legend(loc='best', fontsize=10)
     plt.tight_layout()
@@ -295,15 +299,21 @@ def plot_performance(strategies, save_dir):
 
 def main():
     print("="*60)
-    print("🚀 Multi-Output TGNN 학습 & 백테스팅")
+    print("🚀 TGNN 학습 & 백테스팅")
     print("="*60)
     
+    # 🔥 Feature 컬럼들 (Momentum 제외 - 타겟 변수이므로 정규화하지 않음)
     feature_cols = [
-        "Momentum1M", "Momentum3M", "Momentum6M", "Momentum12M",
         "Volatility", "RSI", "MACD", "Signal", "MACD_Hist",
         "Beta_Factor", "Value_Factor", "Momentum_Factor", "Volatility_Factor",
         "weighted_score", "Mkt_RF", "SMB", "HML", "RMW", "CMA",
     ]
+    
+    # Momentum 컬럼들 (타겟 변수 - 원본 값 유지)
+    momentum_cols = ["Momentum1M", "Momentum3M", "Momentum6M", "Momentum12M"]
+    
+    # 모든 컬럼 (모델 입력용)
+    all_feature_cols = momentum_cols + feature_cols
     
     # ================= 1. 학습 데이터 로드 =================
     print("\n📂 학습 데이터 로드 중...")
@@ -311,7 +321,7 @@ def main():
     train_df["Date"] = pd.to_datetime(train_df["Date"])
     train_df = train_df.replace([np.inf, -np.inf], np.nan).fillna(0)
     
-    # 스케일링
+    # 🔥 Feature만 스케일링 (Momentum은 제외)
     train_mean = {}
     train_std = {}
     for col in feature_cols:
@@ -320,10 +330,12 @@ def main():
             train_std[col] = train_df[col].std()
             train_df[col] = (train_df[col] - train_mean[col]) / (train_std[col] + 1e-8)
     
-    # Momentum Clipping
-    for mom_col in ['Momentum1M', 'Momentum3M', 'Momentum6M', 'Momentum12M']:
+    # 🔥 Momentum은 정규화 없이 원본 값 사용 (극단값만 제거)
+    # 일반적으로 Momentum은 -100% ~ +수백% 범위이므로 합리적인 범위로 제한
+    for mom_col in momentum_cols:
         if mom_col in train_df.columns:
-            train_df[mom_col] = train_df[mom_col].clip(-1.0, 1.0)
+            # 극단값 제거 (-200% ~ +500% 범위로 제한)
+            train_df[mom_col] = train_df[mom_col].clip(-2.0, 5.0)
     
     symbols = sorted(train_df["Symbol"].unique())
     print(f"종목 수: {len(symbols)}")
@@ -331,7 +343,7 @@ def main():
     train_dataset = MultiOutputDataset(
         train_df, 
         window_size=12, 
-        feature_cols=feature_cols,
+        feature_cols=all_feature_cols,  # 🔥 Momentum 포함한 전체 feature
         symbols=symbols
     )
     
@@ -345,8 +357,8 @@ def main():
     val_loader = DataLoader(val_data, batch_size=32, collate_fn=custom_collate)
     
     # ================= 2. 모델 학습 =================
-    print("\n🧠 Multi-Output TGNN 모델 학습 중...")
-    model = MultiOutputTGNN(len(feature_cols), [128, 128, 64], 8, len(symbols))
+    print("\n🧠 TGNN 모델 학습 중...")
+    model = MultiOutputTGNN(len(all_feature_cols), [128, 128, 64], 8, len(symbols))  # 🔥 Momentum 포함한 feature 개수
     model_path = RESULTS_DIR / "best_tgnn_multi.pth"
     
     train_multitask_model(model, train_loader, val_loader, num_epochs=100, lr=1e-4, save_path=str(model_path))
@@ -357,19 +369,21 @@ def main():
     test_df["Date"] = pd.to_datetime(test_df["Date"])
     test_df = test_df.replace([np.inf, -np.inf], np.nan).fillna(0)
     
-    # train 스케일링 파라미터 적용
+    # 🔥 Feature만 train 스케일링 파라미터 적용 (Momentum은 제외)
     for col in feature_cols:
         if col in test_df.columns and col in train_mean:
             test_df[col] = (test_df[col] - train_mean[col]) / (train_std[col] + 1e-8)
     
-    for mom_col in ['Momentum1M', 'Momentum3M', 'Momentum6M', 'Momentum12M']:
+    # 🔥 Momentum은 정규화 없이 원본 값 사용 (극단값만 제거)
+    for mom_col in momentum_cols:
         if mom_col in test_df.columns:
-            test_df[mom_col] = test_df[mom_col].clip(-1.0, 1.0)
+            # 극단값 제거 (-200% ~ +500% 범위로 제한)
+            test_df[mom_col] = test_df[mom_col].clip(-2.0, 5.0)
     
     test_dataset = MultiOutputDataset(
         test_df, 
         window_size=12, 
-        feature_cols=feature_cols,
+        feature_cols=all_feature_cols,  # 🔥 Momentum 포함한 전체 feature
         symbols=symbols
     )
     
@@ -384,6 +398,7 @@ def main():
     
     all_strategies = {}
     all_metrics = {}
+    all_backtesters = {}  # 🔥 Backtester 객체 저장 (시계열 데이터 추출용)
     
     # Buy & Hold
     print("[1/5] Buy & Hold...")
@@ -391,6 +406,7 @@ def main():
     bh_res = bt_buyhold.run_buy_and_hold()
     all_strategies["Buy & Hold"] = bh_res
     all_metrics["Buy & Hold"] = bt_buyhold.metrics
+    all_backtesters["Buy & Hold"] = bt_buyhold
     
     # TGNN 각 주기별
     experiments = [
@@ -407,8 +423,9 @@ def main():
         res = bt.run(freq)
         all_strategies[name] = res
         all_metrics[name] = bt.metrics
+        all_backtesters[name] = bt  # 🔥 Backtester 객체 저장
     
-    # ================= 5. 결과 출력 =================
+    # ================= 5. 결과 출력 및 저장 =================
     print("\n" + "="*60)
     print("📊 Final Results")
     print("="*60)
@@ -416,10 +433,66 @@ def main():
     df_res = create_metrics_summary_table(all_metrics)
     print(df_res.to_string(index=False))
     
+    # 🔥 1. 간단한 비교 테이블 저장
     df_res.to_csv(RESULTS_DIR / "comparison_metrics.csv", index=False, encoding="utf-8-sig")
+    print(f"\n✅ 저장: comparison_metrics.csv")
+    
+    # 🔥 2. 상세한 메트릭 비교 테이블 생성 (백업 스타일)
+    detailed_rows = []
+    for strategy, metrics in all_metrics.items():
+        if not metrics:
+            continue
+        row = {
+            "전략": strategy,
+            "누적수익률": f"{metrics.get('total_return', 0):.2f}%",
+            "CAGR": f"{metrics.get('cagr', 0):.2f}%",
+            "변동성": f"{metrics.get('volatility', 0):.2f}%",
+            "MDD": f"{metrics.get('max_drawdown', 0):.2f}%",
+            "Sharpe": f"{metrics.get('sharpe_ratio', 0):.2f}",
+            "Sortino": f"{metrics.get('sortino_ratio', 0):.2f}",
+            "Calmar": f"{metrics.get('calmar_ratio', 0):.2f}",
+            "VaR(95%)": f"{metrics.get('var_95', 0):.2f}%",
+            "CVaR(95%)": f"{metrics.get('cvar_95', 0):.2f}%",
+            "Info Ratio": f"{metrics.get('information_ratio', 0):.2f}",
+            "Avg Turnover": f"{metrics.get('avg_turnover', 0):.2f}%",
+            "총 거래비용": f"{int(metrics.get('total_transaction_cost', 0)):,}원",
+        }
+        detailed_rows.append(row)
+    
+    df_detailed = pd.DataFrame(detailed_rows)
+    df_detailed.to_csv(RESULTS_DIR / "metrics_comparison.csv", index=False, encoding="utf-8-sig")
+    print(f"✅ 저장: metrics_comparison.csv (상세 메트릭)")
+    
+    # 🔥 3. 각 전략별 시계열 데이터 저장
+    freq_map = {
+        "Buy & Hold": "buyhold",
+        "TGNN 1M": "monthly",
+        "TGNN 3M": "quarterly",
+        "TGNN 6M": "semiannual",
+        "TGNN 12M": "annual",
+    }
+    
+    for strategy_name, bt in all_backtesters.items():
+        freq_name = freq_map.get(strategy_name, strategy_name.lower().replace(" ", "_"))
+        filename = f"timeseries_{freq_name}.csv"
+        filepath = RESULTS_DIR / filename
+        bt.save_timeseries_csv(filepath)
+    
+    # 🔥 4. 그래프 저장
     plot_performance(all_strategies, RESULTS_DIR)
     
-    print(f"\n✅ 완료! 결과: {RESULTS_DIR}")
+    print(f"\n{'='*60}")
+    print(f"✅ 완료! 결과 폴더: {RESULTS_DIR}")
+    print(f"{'='*60}")
+    print("\n📁 생성된 파일들:")
+    print("  - comparison_metrics.csv (요약)")
+    print("  - metrics_comparison.csv (상세)")
+    print("  - timeseries_buyhold.csv")
+    print("  - timeseries_monthly.csv")
+    print("  - timeseries_quarterly.csv")
+    print("  - timeseries_semiannual.csv")
+    print("  - timeseries_annual.csv")
+    print("  - comparison_graph.png")
 
 if __name__ == "__main__":
     main()
