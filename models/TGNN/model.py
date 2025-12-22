@@ -109,8 +109,14 @@ class TGNNModel(nn.Module):
         self.temporal_attn = TemporalAttention(hidden_dims[-1], num_heads)
 
         self.predictor = nn.Sequential(
-            nn.Linear(hidden_dims[-1], 32), nn.ReLU(), nn.Dropout(0.1), nn.Linear(32, 1)
+            nn.Linear(hidden_dims[-1], 32),
+            nn.ReLU(),
+            nn.Dropout(0.2),  # Dropout 증가
+            nn.Linear(32, 1),
+            nn.Tanh()  # -1 ~ 1 범위로 제한
         )
+
+        self.output_scale = nn.Parameter(torch.tensor(20.0))  # 초기값: ±20% 범위
 
     def forward(self, features: torch.Tensor, adj_matrix: torch.Tensor):
         batch, N, T, F = features.shape
@@ -127,7 +133,9 @@ class TGNNModel(nn.Module):
 
         temporal_features = torch.stack(gcn_outputs, dim=1)
         node_embeddings = self.temporal_attn(temporal_features)
+
         predictions = self.predictor(node_embeddings).squeeze(-1)
+        predictions = predictions * self.output_scale
 
         return predictions, node_embeddings
 
@@ -241,7 +249,7 @@ class TGNNDataset(Dataset):
             labels = []
             for symbol in self.symbols:
                 val = next_df[next_df["Symbol"] == symbol]["Momentum1M"].values
-                labels.append(val[0] if len(val) > 0 else 0.0)
+                labels.append(val[0] * 100 if len(val) > 0 else 0.0)
 
             windows.append(
                 {
@@ -332,18 +340,19 @@ def train_model(
     train_loader: DataLoader,
     val_loader: DataLoader,
     num_epochs: int = 300,
-    lr: float = 1e-5, 
+    lr: float = 5e-4,
     save_path: str = "best_tgnn.pth",
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"🖥️  사용 디바이스: {device}")
     
     model = model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.HuberLoss(delta=0.1)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.5)
+    criterion = nn.MSELoss()
     
     # ✅ Gradient Clipping 값
-    max_grad_norm = 0.5
+    max_grad_norm = 1.0
 
     best_val_loss = float("inf")
     patience = 30
@@ -391,6 +400,8 @@ def train_model(
 
         avg_train_loss = train_loss / max(train_batches, 1)
         avg_val_loss = val_loss / max(val_batches, 1)
+
+        scheduler.step(avg_val_loss)
 
         # Early Stopping
         if avg_val_loss < best_val_loss:
