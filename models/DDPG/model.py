@@ -6,19 +6,77 @@ from collections import deque
 import random
 
 
-# ==================== 1. Factor-Aware Network Building Block ====================
+# ==================== 1. Temporal Attention Module ====================
+class TemporalAttention(nn.Module):
+    """시계열 데이터의 중요한 시점에 집중하는 Attention 메커니즘"""
+
+    def __init__(self, hidden_dim, num_heads=4, dropout=0.1):
+        super(TemporalAttention, self).__init__()
+        self.attention = nn.MultiheadAttention(
+            hidden_dim, num_heads, dropout=dropout, batch_first=True
+        )
+        self.layer_norm = nn.LayerNorm(hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        # x: (Batch, Seq_Len, Hidden_Dim)
+        attn_out, attn_weights = self.attention(x, x, x)
+        x = self.layer_norm(x + self.dropout(attn_out))  # Residual connection
+        return x, attn_weights
+
+
+# ==================== 2. Enhanced Factor Encoder with LSTM ====================
+class TemporalFactorEncoder(nn.Module):
+    """시계열 팩터 분석을 위한 LSTM 기반 인코더"""
+
+    def __init__(self, num_features, hidden_dim=64, num_layers=2, dropout=0.2):
+        super(TemporalFactorEncoder, self).__init__()
+        self.hidden_dim = hidden_dim
+
+        # LSTM for temporal processing
+        self.lstm = nn.LSTM(
+            num_features,
+            hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0,
+        )
+
+        # Additional feature extraction
+        self.feature_net = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x):
+        # x: (Batch, Seq_Len, Num_Features)
+        lstm_out, (h_n, c_n) = self.lstm(x)
+
+        # Use last hidden state
+        last_hidden = lstm_out[:, -1, :]  # (Batch, Hidden_Dim)
+
+        # Additional processing
+        features = self.feature_net(last_hidden)
+        return features
+
+
+# ==================== 3. Shared Factor Encoder (Legacy Support) ====================
 class SharedFactorEncoder(nn.Module):
     """모든 종목에 공유되는 팩터 분석 레이어 (Universal Rules Learner)"""
 
-    def __init__(self, num_features, hidden_dim=64):
+    def __init__(self, num_features, hidden_dim=64, dropout=0.2):
         super(SharedFactorEncoder, self).__init__()
         self.net = nn.Sequential(
             nn.Linear(num_features, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
+            nn.Dropout(dropout),
         )
 
     def forward(self, x):
@@ -28,102 +86,181 @@ class SharedFactorEncoder(nn.Module):
         # Output: (Batch, Num_Stocks, Hidden_Dim)
 
 
-# ==================== 2. Actor Network ====================
+# ==================== 4. Enhanced Actor Network ====================
 class Actor(nn.Module):
-    """포트폴리오 비중 결정 (Factor Analysis -> Portfolio Weighting)"""
+    """개선된 포트폴리오 비중 결정 네트워크 (Temporal Attention + LSTM)"""
 
     def __init__(
-        self, num_stocks, num_features, hidden_dim=128, min_weight=0.02, max_weight=0.30
+        self,
+        num_stocks,
+        num_features,
+        window_size=12,
+        hidden_dim=128,
+        min_weight=0.02,
+        max_weight=0.30,
+        use_temporal=True,
+        dropout=0.2,
     ):
         super(Actor, self).__init__()
         self.num_stocks = num_stocks
         self.num_features = num_features
+        self.window_size = window_size
         self.min_weight = min_weight
         self.max_weight = max_weight
+        self.use_temporal = use_temporal
 
-        # 1. 팩터 분석 (공유 가중치)
-        self.encoder = SharedFactorEncoder(num_features, 64)
+        if use_temporal:
+            # Temporal processing with LSTM
+            self.temporal_encoder = TemporalFactorEncoder(
+                num_features, hidden_dim=64, dropout=dropout
+            )
 
-        # 2. 글로벌 문맥 통합 (Global Context)
-        input_dim = num_stocks * 64
+            # Attention mechanism
+            self.attention = TemporalAttention(64, num_heads=4, dropout=dropout)
+
+            # Global context integration
+            input_dim = num_stocks * 64
+        else:
+            # Legacy mode (backward compatibility)
+            self.encoder = SharedFactorEncoder(num_features, 64, dropout=dropout)
+            input_dim = num_stocks * 64
+
+        # Portfolio weight generation
         self.global_net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, num_stocks),  # 각 종목별 점수 출력
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, num_stocks),
         )
 
     def forward(self, state):
-        # State: (Batch, Num_Stocks * Num_Features) -> Flat Vector
         batch_size = state.shape[0]
 
-        # 1. 구조화 (Reshape)
-        x = state.reshape(batch_size, self.num_stocks, self.num_features)
+        if self.use_temporal:
+            # State: (Batch, Num_Stocks * Window_Size * Num_Features)
+            # Reshape to process temporal information
+            x = state.reshape(
+                batch_size, self.num_stocks, self.window_size, self.num_features
+            )
 
-        # 2. 개별 종목 팩터 분석
-        x = self.encoder(x)  # (Batch, Num_Stocks, 64)
+            # Process each stock's time series
+            stock_features = []
+            for i in range(self.num_stocks):
+                stock_ts = x[:, i, :, :]  # (Batch, Window_Size, Num_Features)
+                features = self.temporal_encoder(stock_ts)  # (Batch, 64)
+                stock_features.append(features)
 
-        # 3. 전체 시장 상황 종합
-        x = x.reshape(batch_size, -1)  # Flatten
+            # Stack: (Batch, Num_Stocks, 64)
+            x = torch.stack(stock_features, dim=1)
+
+            # Apply attention across stocks
+            x, _ = self.attention(x)  # (Batch, Num_Stocks, 64)
+
+            # Flatten for global processing
+            x = x.reshape(batch_size, -1)
+        else:
+            # Legacy mode: use only last timestep
+            x = state.reshape(batch_size, self.num_stocks, -1)
+            # Extract last features
+            last_features = x[:, :, -self.num_features :]
+            x = self.encoder(last_features)
+            x = x.reshape(batch_size, -1)
+
+        # Generate portfolio weights
         scores = self.global_net(x)
-
-        # 4. 포트폴리오 비중 (Softmax)
         weights = F.softmax(scores, dim=-1)
 
-        # 비중 제약 추가
+        # Apply constraints
         weights = torch.clamp(weights, min=self.min_weight, max=self.max_weight)
         weights = weights / weights.sum(dim=-1, keepdim=True)
 
-        # 엔트로피 계산
+        # Calculate entropy for exploration bonus
         entropy = -torch.sum(weights * torch.log(weights + 1e-8), dim=-1)
 
         return weights, entropy
 
 
-# ==================== 3. Critic Network ====================
+# ==================== 5. Enhanced Critic Network ====================
 class Critic(nn.Module):
-    """Q-Value 추정 (Factor Analysis + Action -> Q-Value)"""
+    """개선된 Q-Value 추정 네트워크"""
 
-    def __init__(self, num_stocks, num_features, action_dim, hidden_dim=128):
+    def __init__(
+        self,
+        num_stocks,
+        num_features,
+        action_dim,
+        window_size=12,
+        hidden_dim=128,
+        use_temporal=True,
+        dropout=0.2,
+    ):
         super(Critic, self).__init__()
         self.num_stocks = num_stocks
         self.num_features = num_features
+        self.window_size = window_size
+        self.use_temporal = use_temporal
 
-        # 1. 팩터 분석 (공유 가중치)
-        self.encoder = SharedFactorEncoder(num_features, 64)
+        if use_temporal:
+            self.temporal_encoder = TemporalFactorEncoder(
+                num_features, hidden_dim=64, dropout=dropout
+            )
+            input_dim = (num_stocks * 64) + action_dim
+        else:
+            self.encoder = SharedFactorEncoder(num_features, 64, dropout=dropout)
+            input_dim = (num_stocks * 64) + action_dim
 
-        # 2. State + Action 통합
-        input_dim = (num_stocks * 64) + action_dim
+        # Q-value estimation network
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, 1),
         )
 
     def forward(self, state, action):
         batch_size = state.shape[0]
 
-        # 1. 구조화 및 팩터 분석
-        x = state.reshape(batch_size, self.num_stocks, self.num_features)
-        x = self.encoder(x)
-        x = x.reshape(batch_size, -1)
+        if self.use_temporal:
+            # Reshape for temporal processing
+            x = state.reshape(
+                batch_size, self.num_stocks, self.window_size, self.num_features
+            )
 
-        # 2. 행동(Action)과 결합
+            # Process each stock's time series
+            stock_features = []
+            for i in range(self.num_stocks):
+                stock_ts = x[:, i, :, :]
+                features = self.temporal_encoder(stock_ts)
+                stock_features.append(features)
+
+            x = torch.stack(stock_features, dim=1)
+            x = x.reshape(batch_size, -1)
+        else:
+            # Legacy mode
+            x = state.reshape(batch_size, self.num_stocks, -1)
+            last_features = x[:, :, -self.num_features :]
+            x = self.encoder(last_features)
+            x = x.reshape(batch_size, -1)
+
+        # Combine state and action
         xa = torch.cat([x, action], dim=-1)
 
-        # 3. 가치 추정
+        # Estimate Q-value
         q_value = self.net(xa)
         return q_value
 
 
-# ==================== 4. Replay Buffer ====================
+# ==================== 6. Replay Buffer ====================
 class ReplayBuffer:
     """경험 저장 및 샘플링"""
 
@@ -148,39 +285,62 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-# ==================== 5. DDPG Agent ====================
+# ==================== 7. Enhanced DDPG Agent ====================
 class DDPGAgent:
     def __init__(
         self,
         num_stocks,
         num_features,
+        window_size=12,
         lr_actor=1e-4,
         lr_critic=1e-3,
         gamma=0.99,
         tau=0.001,
         entropy_coef=0.01,
+        use_temporal=True,
+        use_scheduler=True,
         device="cuda",
     ):
         self.device = device
         self.gamma = gamma
         self.tau = tau
         self.entropy_coef = entropy_coef
+        self.use_scheduler = use_scheduler
 
         action_dim = num_stocks
 
         # Main Networks
-        self.actor = Actor(num_stocks, num_features).to(device)
-        self.critic = Critic(num_stocks, num_features, action_dim).to(device)
+        self.actor = Actor(
+            num_stocks, num_features, window_size, use_temporal=use_temporal
+        ).to(device)
+        self.critic = Critic(
+            num_stocks, num_features, action_dim, window_size, use_temporal=use_temporal
+        ).to(device)
 
         # Target Networks
-        self.actor_target = Actor(num_stocks, num_features).to(device)
-        self.critic_target = Critic(num_stocks, num_features, action_dim).to(device)
+        self.actor_target = Actor(
+            num_stocks, num_features, window_size, use_temporal=use_temporal
+        ).to(device)
+        self.critic_target = Critic(
+            num_stocks, num_features, action_dim, window_size, use_temporal=use_temporal
+        ).to(device)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         # Optimizers
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=lr_actor)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr_critic)
+        self.critic_optimizer = torch.optim.Adam(
+            self.critic.parameters(), lr=lr_critic
+        )
+
+        # Learning Rate Schedulers
+        if use_scheduler:
+            self.actor_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.actor_optimizer, T_max=1000, eta_min=lr_actor * 0.1
+            )
+            self.critic_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.critic_optimizer, T_max=1000, eta_min=lr_critic * 0.1
+            )
 
         # Replay Buffer
         self.replay_buffer = ReplayBuffer()
@@ -190,20 +350,20 @@ class DDPGAgent:
         state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            action, _ = self.actor(state)  # ⭐ 들여쓰기!
-            action = action.cpu().numpy()[0]  # ⭐ 들여쓰기!
+            action, _ = self.actor(state)
+            action = action.cpu().numpy()[0]
 
         if noise_std > 0:
             noise = np.random.normal(0, noise_std, size=action.shape)
             action = action + noise
             action = np.clip(action, 0, 1)
-            action = action / (action.sum() + 1e-8)  # 0 나누기 방지
+            action = action / (action.sum() + 1e-8)  # Normalize
 
         return action
 
     def train(self, batch_size=64):
         if len(self.replay_buffer) < batch_size:
-            return
+            return 0.0, 0.0
 
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(
             batch_size
@@ -214,7 +374,7 @@ class DDPGAgent:
         next_states = torch.FloatTensor(next_states).to(self.device)
         dones = torch.FloatTensor(dones).to(self.device)
 
-        # Critic 업데이트
+        # Critic Update
         with torch.no_grad():
             next_actions, _ = self.actor_target(next_states)
             target_q = rewards + (1 - dones) * self.gamma * self.critic_target(
@@ -225,34 +385,40 @@ class DDPGAgent:
         critic_loss = F.mse_loss(current_q, target_q)
 
         # NaN Check
-        if torch.isnan(critic_loss):
+        if torch.isnan(critic_loss) or torch.isinf(critic_loss):
+            print("⚠️ NaN/Inf detected in critic loss")
             return 0.0, 0.0
 
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        # ✅ Gradient Clipping
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 1.0)
         self.critic_optimizer.step()
 
-        # Actor 업데이트
+        if self.use_scheduler:
+            self.critic_scheduler.step()
+
+        # Actor Update
         new_actions, entropy = self.actor(states)
         actor_loss = -self.critic(states, new_actions).mean()
 
-        # ⭐ 엔트로피 추가
+        # Entropy bonus for exploration
         entropy_bonus = -self.entropy_coef * entropy.mean()
         total_actor_loss = actor_loss + entropy_bonus
 
         # NaN Check
-        if torch.isnan(total_actor_loss):
+        if torch.isnan(total_actor_loss) or torch.isinf(total_actor_loss):
+            print("⚠️ NaN/Inf detected in actor loss")
             return critic_loss.item(), 0.0
 
         self.actor_optimizer.zero_grad()
         total_actor_loss.backward()
-        # ✅ Gradient Clipping
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
         self.actor_optimizer.step()
 
-        # Target Soft Update
+        if self.use_scheduler:
+            self.actor_scheduler.step()
+
+        # Target Network Soft Update
         self._soft_update(self.actor, self.actor_target)
         self._soft_update(self.critic, self.critic_target)
 
@@ -263,3 +429,10 @@ class DDPGAgent:
             target_param.data.copy_(
                 self.tau * param.data + (1.0 - self.tau) * target_param.data
             )
+
+    def get_lr(self):
+        """현재 학습률 반환"""
+        return {
+            "actor_lr": self.actor_optimizer.param_groups[0]["lr"],
+            "critic_lr": self.critic_optimizer.param_groups[0]["lr"],
+        }
