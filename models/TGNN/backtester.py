@@ -65,7 +65,7 @@ class Backtester:
         """배열을 확률 분포로 변환"""
         e_x = np.exp(x - np.max(x))
         return e_x / e_x.sum()
-    # backtester.py에 Softmax 가중치 추가
+    
     def allocate_weights_softmax(self, predictions, active_mask):
         """예측값 기반 Softmax 가중치"""
         valid_pred = predictions[active_mask]
@@ -114,7 +114,7 @@ class Backtester:
                 date = self.dataset.windows[idx]["date"]
                 active_mask = batch["active_mask"].numpy()
                 
-                # 🔥 실제 수익률은 target_type에 해당하는 라벨 사용
+                # 🔥 실제 수익률은 target_type에 해당하는 라벨 사용 (소수 단위)
                 if self.target_type in batch:
                     actual_returns = batch[self.target_type].numpy()
                 else:
@@ -136,8 +136,8 @@ class Backtester:
                     pred_returns = predictions.squeeze(0).numpy()
                     
                     # 🔥 NaN/Inf 체크 및 클리핑
-                    pred_returns = np.nan_to_num(pred_returns, nan=-np.inf, posinf=10.0, neginf=-10.0)
-                    pred_returns = np.clip(pred_returns, -10.0, 10.0)
+                    pred_returns = np.nan_to_num(pred_returns, nan=-np.inf, posinf=1.0, neginf=-1.0)
+                    pred_returns = np.clip(pred_returns, -1.0, 1.0)
                     
                     # 상장 전 종목 제외
                     pred_returns[~active_mask] = -np.inf
@@ -165,13 +165,13 @@ class Backtester:
                 # 거래비용
                 transaction_cost = turnover * capital * (self.config.cost_bps / 10000)
                 
-                # 🔥 실제 수익률 클리핑 (극단값 방지)
-                actual_returns = np.clip(actual_returns, -50.0, 50.0)
+                # 🔥 실제 수익률 클리핑 (극단값 방지) - 소수 단위
+                actual_returns = np.clip(actual_returns, -0.5, 0.5)
                 
-                # 포트폴리오 수익률
+                # 포트폴리오 수익률 (소수)
                 portfolio_return = np.dot(current_weights, actual_returns)
                 
-                # 벤치마크 수익률
+                # 벤치마크 수익률 (소수)
                 benchmark_return = np.dot(benchmark_weights, actual_returns)
                 
                 # 🔥 수익률 검증
@@ -179,8 +179,8 @@ class Backtester:
                     print(f"⚠️ Warning: Invalid portfolio_return at {date}: {portfolio_return}")
                     portfolio_return = 0.0
                 
-                # 자산 업데이트
-                capital = capital * (1 + portfolio_return / 100) - transaction_cost
+                # ✅ 자산 업데이트 (소수 단위 그대로 사용)
+                capital = capital * (1 + portfolio_return) - transaction_cost
                 
                 # 드로다운
                 peak = max(peak, capital)
@@ -189,20 +189,20 @@ class Backtester:
                 # 누적 수익률
                 cumulative_return = (capital / self.config.initial_capital - 1) * 100
                 
-                # 초과 수익률
+                # 초과 수익률 (소수)
                 excess_return = portfolio_return - benchmark_return
                 
-                # 기록 저장
+                # ✅ 기록 저장 (소수 → % 변환)
                 self.history.append({
                     "date": date,
                     "portfolio_value": capital,
-                    "period_return": portfolio_return,
+                    "period_return": portfolio_return * 100,  # 소수 → %
                     "cumulative_return": cumulative_return,
                     "drawdown": drawdown,
                     "turnover": turnover,
                     "transaction_cost": transaction_cost,
-                    "benchmark_return": benchmark_return,
-                    "excess_return": excess_return,
+                    "benchmark_return": benchmark_return * 100,  # 소수 → %
+                    "excess_return": excess_return * 100,  # 소수 → %
                     "weights": current_weights.copy(),
                     "active_stocks": int(np.sum(active_mask)),
                 })
@@ -220,7 +220,11 @@ class Backtester:
         }
     
     def run_buy_and_hold(self) -> Dict:
-        """Buy & Hold (동일가중, 최초 한 번만 리밸런싱 – Hybrid와 동일 규칙)"""
+        """
+        ✅ Buy & Hold (고정값 - 절대 수정 금지!)
+        
+        원본 데이터의 Momentum1M을 % 단위 그대로 사용
+        """
         capital = self.config.initial_capital
         peak = capital
         n_stocks = len(self.dataset.symbols)
@@ -243,9 +247,9 @@ class Backtester:
             date = self.dataset.windows[idx]["date"]
             active_mask = batch["active_mask"].numpy().astype(bool)
 
-            # 월 수익률 (Hybrid와 같은 단위로!)
-            # 여기서는 소수 수익률(0.05 = 5%)라고 가정
-            r = batch["Momentum1M"].numpy()  # shape: (n_stocks,)
+            # ✅ 원본 데이터 그대로 사용 (% 단위)
+            # dataset이 이미 /100 처리했으므로 소수 단위임
+            r = batch["Momentum1M"].numpy()  # shape: (n_stocks,) - 소수 단위
 
             # 2) 상장 전 종목 비중 0
             w = base_weights.copy()
@@ -264,7 +268,7 @@ class Backtester:
             drawdown = (capital / peak - 1.0) * 100.0
             cum_ret = (capital / self.config.initial_capital - 1.0) * 100.0
 
-            # 6) 기록 저장 (period_return은 %로 저장)
+            # 6) 기록 저장 (소수 → %로 변환하여 저장)
             self.history.append(
                 {
                     "date": date,
