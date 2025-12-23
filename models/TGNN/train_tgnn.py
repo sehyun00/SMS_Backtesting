@@ -214,7 +214,7 @@ class TGNNModel(BaseTGNNModel):
 
         # [개선] Input projection + Batch Norm
         self.input_proj = nn.Linear(num_features, hidden_dims[0])
-        self.input_bn = nn.BatchNorm1d(num_stocks)
+        self.input_ln = nn.LayerNorm(hidden_dims[0])  
 
         # [개선] GCN layers + Batch Norm
         self.gcn_layers = nn.ModuleList(
@@ -224,8 +224,8 @@ class TGNNModel(BaseTGNNModel):
             ]
         )
         
-        self.gcn_bns = nn.ModuleList(
-            [nn.BatchNorm1d(num_stocks) for _ in range(len(hidden_dims) - 1)]
+        self.gcn_lns = nn.ModuleList(
+            [nn.LayerNorm(hidden_dims[i + 1]) for i in range(len(hidden_dims) - 1)]
         )
 
         self.temporal_attn = TemporalAttention(hidden_dims[-1], num_heads)
@@ -258,12 +258,12 @@ class TGNNModel(BaseTGNNModel):
         for t in range(T):
             x_t = features[:, :, t, :]
             h = self.input_proj(x_t)
-            h = self.input_bn(h)  # [개선] Batch Norm
+            h = self.input_ln(h)
             
             # [개선] Residual Connection
-            for gcn, bn in zip(self.gcn_layers, self.gcn_bns):
+            for gcn, ln in zip(self.gcn_layers, self.gcn_lns):
                 h_new = gcn(h, adj_matrix)
-                h_new = bn(h_new)
+                h_new = ln(h_new)
                 
                 # 차원이 같을 때만 Residual
                 if h.shape[-1] == h_new.shape[-1]:

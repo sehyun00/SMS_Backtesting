@@ -146,12 +146,17 @@ class TGNNModel(BaseTGNNModel):
         from model import GraphConvLayer, TemporalAttention
 
         self.input_proj = nn.Linear(num_features, hidden_dims[0])
+        self.input_ln = nn.LayerNorm(hidden_dims[0])
 
         self.gcn_layers = nn.ModuleList(
             [
                 GraphConvLayer(hidden_dims[i], hidden_dims[i + 1])
                 for i in range(len(hidden_dims) - 1)
             ]
+        )
+
+        self.gcn_lns = nn.ModuleList(
+            [nn.LayerNorm(hidden_dims[i + 1]) for i in range(len(hidden_dims) - 1)]
         )
 
         self.temporal_attn = TemporalAttention(hidden_dims[-1], num_heads)
@@ -183,8 +188,15 @@ class TGNNModel(BaseTGNNModel):
         for t in range(T):
             x_t = features[:, :, t, :]
             h = self.input_proj(x_t)
-            for gcn in self.gcn_layers:
-                h = gcn(h, adj_matrix)
+            h = self.input_ln(h)
+            for gcn, ln in zip(self.gcn_layers, self.gcn_lns):
+                h_new = gcn(h, adj_matrix)
+                h_new = ln(h_new)
+
+                if h.shape[-1] == h_new.shape[-1]:
+                    h = h_new + h
+                else:
+                    h = h_new
             gcn_outputs.append(h)
 
         temporal_features = torch.stack(gcn_outputs, dim=1)
@@ -282,10 +294,10 @@ def plot_performance(strategies, all_metrics, save_dir):
     plt.tight_layout()
     plt.savefig(save_dir / "comparison_graph.png", dpi=300)
     plt.close()
+    print(f"✅ 저장: comparison_graph.png (시각화)")
 
 
 # ============ main (백테스트만) ============
-
 
 def main():
     print("=" * 60)
@@ -332,7 +344,7 @@ def main():
 
     for mom_col in momentum_cols:
         if mom_col in test_df.columns:
-            test_df[mom_col] = test_df[mom_col].clip(-0.4, 0.5)
+            test_df[mom_col] = test_df[mom_col].clip(-100, 100)
 
     symbols = sorted(test_df["Symbol"].unique())
     print(f"종목 수(테스트): {len(symbols)}")
@@ -356,6 +368,8 @@ def main():
         num_heads=8,
         num_stocks=len(symbols),
     )
+    
+    # [복구] 재학습 완료로 필터링 불필요
     model.load_state_dict(torch.load(model_path, map_location="cpu"), strict=False)
 
     # 백테스트
