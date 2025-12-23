@@ -1,182 +1,99 @@
 """
-Portfolio Constraints Utilities
-포트폴리오 제약 조건 관리
+Portfolio Constraints
+포트폴리오 제약 조건
 """
 
-import torch
 import numpy as np
 
 
-def enforce_weight_constraints(
-    weights, min_weight=0.05, max_weight=0.20, max_iter=10, eps=1e-4
-):
+def apply_concentration_limit(weights, max_weight=0.15):
     """
-    반복적 투영으로 포트폴리오 가중치 제약 조건 강제
+    단일 종목 최대 비중 제한 (Concentration Limit)
 
-    보장사항:
-    1. min_weight <= w_i <= max_weight (모든 종목)
-    2. sum(w) = 1.0
-    3. 정규화를 통한 우회 방지
+    과도한 집중을 방지하여 리스크를 분산시킵니다.
+    README 기준: 단일 종목 최대 15% 비중
 
     Args:
-        weights: (Batch, N) 또는 (N,) 가중치 텐서
-        min_weight: 최소 비중
-        max_weight: 최대 비중
-        max_iter: 최대 반복 횟수
-        eps: 수렴 허용 오차
+        weights: (N,) 포트폴리오 가중치 numpy array
+        max_weight: 단일 종목 최대 허용 비중 (0.15 = 15%)
 
     Returns:
-        constrained_weights: 제약 조건을 만족하는 가중치
+        constrained_weights: (N,) 제약이 적용된 가중치 (sum=1 보장)
+
+    Example:
+        >>> weights = np.array([0.5, 0.3, 0.2])  # 초기 가중치
+        >>> constrained = apply_concentration_limit(weights, max_weight=0.15)
+        >>> # 결과: [0.15, 0.15, 0.2] -> 정규화 -> [0.3, 0.3, 0.4]
     """
-    if isinstance(weights, np.ndarray):
-        weights = torch.FloatTensor(weights)
+    # 가중치를 numpy array로 변환
+    weights = np.array(weights, dtype=np.float32)
 
-    original_shape = weights.shape
-    if len(original_shape) == 1:
-        weights = weights.unsqueeze(0)
+    # 최대 비중으로 클립
+    clipped_weights = np.clip(weights, 0, max_weight)
 
-    batch_size, n_stocks = weights.shape
+    # 합이 1이 되도록 정규화
+    weight_sum = clipped_weights.sum()
 
-    for iteration in range(max_iter):
-        # Step 1: [min_weight, max_weight]로 클램핑
-        weights_clamped = torch.clamp(weights, min_weight, max_weight)
+    if weight_sum > 1e-8:
+        normalized_weights = clipped_weights / weight_sum
+    else:
+        # 모든 가중치가 0이면 균등 분배
+        normalized_weights = np.ones_like(weights) / len(weights)
 
-        # Step 2: 현재 합계 확인
-        current_sum = weights_clamped.sum(dim=-1, keepdim=True)
-
-        # Step 3: 합계가 1.0에 가까우면 완료
-        if torch.allclose(current_sum, torch.ones_like(current_sum), atol=eps):
-            weights = weights_clamped
-            break
-
-        # Step 4: 초과/부족분 재분배
-        deficit = 1.0 - current_sum  # (Batch, 1)
-
-        # 증가/감소 필요 여부 확인
-        need_increase = deficit > 0  # (Batch, 1)
-
-        # 조정 가능한 종목 찾기
-        room_to_grow = max_weight - weights_clamped  # (Batch, N)
-        room_to_shrink = weights_clamped - min_weight  # (Batch, N)
-
-        # 증가용: 성장 여지가 있는 종목에 분배
-        total_room_grow = room_to_grow.sum(dim=-1, keepdim=True)
-        adjustment_grow = torch.where(
-            total_room_grow > eps,
-            deficit * (room_to_grow / (total_room_grow + 1e-8)),
-            deficit / n_stocks,
-        )
-
-        # 감소용: 축소 여지가 있는 종목에서 차감
-        total_room_shrink = room_to_shrink.sum(dim=-1, keepdim=True)
-        adjustment_shrink = torch.where(
-            total_room_shrink > eps,
-            deficit * (room_to_shrink / (total_room_shrink + 1e-8)),
-            deficit / n_stocks,
-        )
-
-        # 적절한 조정 적용
-        adjustment = torch.where(need_increase, adjustment_grow, adjustment_shrink)
-        weights = weights_clamped + adjustment
-
-    # 최종 안전 장치: 클램핑 및 정규화
-    weights = torch.clamp(weights, min_weight, max_weight)
-    weights = weights / (weights.sum(dim=-1, keepdim=True) + 1e-8)
-
-    # 원래 shape으로 복원
-    if len(original_shape) == 1:
-        weights = weights.squeeze(0)
-
-    return weights
+    return normalized_weights
 
 
-def check_constraint_violation(
-    weights, min_weight=0.05, max_weight=0.20, sum_tolerance=1e-3
-):
+def apply_min_weight_threshold(weights, min_weight=0.01):
     """
-    제약 조건 위반 여부 확인
+    최소 비중 임계값 적용
+
+    너무 작은 비중을 0으로 설정하여 거래 비용을 절감합니다.
 
     Args:
-        weights: (Batch, N) 또는 (N,) 가중치
-        min_weight: 최소 비중
-        max_weight: 최대 비중
-        sum_tolerance: 합계 허용 오차
+        weights: (N,) 포트폴리오 가중치 numpy array
+        min_weight: 최소 허용 비중 (1% 미만은 0으로 처리)
 
     Returns:
-        violations: dict with violation details
+        thresholded_weights: (N,) 임계값이 적용된 가중치 (sum=1 보장)
     """
-    if isinstance(weights, torch.Tensor):
-        weights = weights.detach().cpu().numpy()
+    weights = np.array(weights, dtype=np.float32)
 
-    if len(weights.shape) == 1:
-        weights = weights.reshape(1, -1)
+    # 임계값 미만은 0으로 설정
+    thresholded = np.where(weights < min_weight, 0, weights)
 
-    violations = {
-        "below_min": [],
-        "above_max": [],
-        "sum_violations": [],
-    }
+    # 정규화
+    weight_sum = thresholded.sum()
 
-    for i, w in enumerate(weights):
-        # 최소/최대 비중 위반
-        below_min_idx = np.where(w < min_weight)[0]
-        above_max_idx = np.where(w > max_weight)[0]
+    if weight_sum > 1e-8:
+        normalized = thresholded / weight_sum
+    else:
+        # 모두 0이면 균등 분배
+        normalized = np.ones_like(weights) / len(weights)
 
-        if len(below_min_idx) > 0:
-            violations["below_min"].append((i, below_min_idx.tolist()))
-
-        if len(above_max_idx) > 0:
-            violations["above_max"].append((i, above_max_idx.tolist()))
-
-        # 합계 위반
-        weight_sum = np.sum(w)
-        if abs(weight_sum - 1.0) > sum_tolerance:
-            violations["sum_violations"].append((i, weight_sum))
-
-    return violations
+    return normalized
 
 
-def calculate_concentration_metrics(weights):
+def apply_long_only_constraint(weights):
     """
-    집중도 메트릭 계산
+    Long-only 제약 (매도 금지, 가중치 >= 0)
 
     Args:
-        weights: (Batch, N) 또는 (N,) 가중치
+        weights: (N,) 포트폴리오 가중치 numpy array
 
     Returns:
-        metrics: dict with herfindahl_index, effective_stocks, max_weight
+        long_only_weights: (N,) 양수 제약이 적용된 가중치 (sum=1 보장)
     """
-    if isinstance(weights, torch.Tensor):
-        weights = weights.detach().cpu().numpy()
+    weights = np.array(weights, dtype=np.float32)
 
-    if len(weights.shape) == 1:
-        weights = weights.reshape(1, -1)
+    # 음수 가중치를 0으로 클립
+    long_only = np.clip(weights, 0, None)
 
-    metrics_list = []
+    # 정규화
+    weight_sum = long_only.sum()
 
-    for w in weights:
-        # Herfindahl Index (HHI)
-        hhi = np.sum(w**2)
+    if weight_sum > 1e-8:
+        normalized = long_only / weight_sum
+    else:
+        normalized = np.ones_like(weights) / len(weights)
 
-        # Effective number of stocks
-        effective_stocks = 1.0 / hhi if hhi > 0 else len(w)
-
-        # Maximum weight
-        max_weight = np.max(w)
-
-        # Entropy (다양성)
-        entropy = -np.sum(w * np.log(w + 1e-10))
-        max_entropy = np.log(len(w))
-        normalized_entropy = entropy / max_entropy
-
-        metrics_list.append(
-            {
-                "herfindahl_index": hhi,
-                "effective_stocks": effective_stocks,
-                "max_weight": max_weight,
-                "entropy": entropy,
-                "normalized_entropy": normalized_entropy,
-            }
-        )
-
-    return metrics_list[0] if len(weights) == 1 else metrics_list
+    return normalized

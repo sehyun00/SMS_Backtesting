@@ -23,8 +23,8 @@ class HybridActor(nn.Module):
         self.num_features = num_features
 
         # 제약 파라미터
-        self.MIN_WEIGHT = 0.05  # 5% 최소 비중
-        self.MAX_WEIGHT = 0.20  # 20% 최대 비중
+        self.MIN_WEIGHT = 0.0  # 0% 최소 비중
+        self.MAX_WEIGHT = 0.25  # 25% 최대 비중
 
         # 동적 제약을 위한 기본값 저장
         self.BASE_MIN_WEIGHT = 0.05
@@ -65,7 +65,7 @@ class HybridActor(nn.Module):
             nn.Linear(hidden_dim // 2, num_stocks),
         )
 
-        # 앙상블 가중치 네트워크
+        # 앵상블 가중치 네트워크
         ensemble_input_dim = state_dim + num_stocks * 2
 
         self.ensemble_weight_net = nn.Sequential(
@@ -166,9 +166,10 @@ class HybridActor(nn.Module):
 
         Returns:
             final_weights: (Batch, N) - 최종 포트폴리오 가중치
-            alpha: (Batch,) - 앙상블 가중치
+            alpha: (Batch,) - 앵상블 가중치
             tgnn_weights: (Batch, N) - TGNN 경로 가중치
             ddpg_weights: (Batch, N) - DDPG 경로 가중치
+            entropy: (Batch,) - 포트폴리오 다양성 (Entropy)
         """
         batch = state.shape[0]
         feat_size = self.num_stocks * self.window_size * self.num_features
@@ -205,7 +206,7 @@ class HybridActor(nn.Module):
         ddpg_logits = self.ddpg_head(ddpg_features)
         ddpg_weights = F.softmax(ddpg_logits / temperature, dim=-1)
 
-        # 앙상블
+        # 앵상블
         ensemble_input = torch.cat([state, tgnn_weights, ddpg_weights], dim=-1)
         alpha_raw = self.ensemble_weight_net(ensemble_input)
 
@@ -216,4 +217,9 @@ class HybridActor(nn.Module):
         final_weights = alpha * tgnn_weights + (1 - alpha) * ddpg_weights
         final_weights = self._enforce_constraints(final_weights)
 
-        return final_weights, alpha.squeeze(-1), tgnn_weights, ddpg_weights
+        # Entropy 계산 (포트폴리오 다양성 측정)
+        # Entropy = -sum(w * log(w))
+        # 높을수록 균등 분산, 낮을수록 집중
+        entropy = -torch.sum(final_weights * torch.log(final_weights + 1e-8), dim=-1)
+
+        return final_weights, alpha.squeeze(-1), tgnn_weights, ddpg_weights, entropy
