@@ -381,7 +381,6 @@ def main():
         num_stocks=len(symbols),
     )
     
-    # [복구] 재학습 완료로 필터링 불필요
     model.load_state_dict(torch.load(model_path, map_location="cpu"), strict=False)
 
     # 백테스트
