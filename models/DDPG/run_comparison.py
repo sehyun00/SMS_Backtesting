@@ -304,17 +304,18 @@ def calculate_metrics(returns_dict, dates, strategy_name):
 
 
 def run_buy_and_hold(test_windows, test_symbols):
-    """1/N 매수 후 보유"""
+    """1/N 매수 후 보유 - 수정 버전"""
     initial_capital = 1_000_000
     n_stocks = len(test_symbols)
     weights = np.ones(n_stocks) / n_stocks
 
-    portfolio_values = [initial_capital]
+    portfolio_values = []  # ✅ 빈 리스트로 시작
     dates = []
     trade_logs = []
 
     ts_data = {"return": [], "portfolio_value": [], "drawdown": [], "turnover": []}
 
+    # 초기 매수 로그
     if len(test_windows) > 0:
         first_date = test_windows[0]["date"]
         log_entry = {
@@ -326,32 +327,37 @@ def run_buy_and_hold(test_windows, test_symbols):
             log_entry[sym] = w
         trade_logs.append(log_entry)
 
+    current_value = initial_capital  # ✅ 현재 포트폴리오 가치
+    peak = initial_capital  # ✅ 누적 최고점 초기화
+
     for i, window in enumerate(test_windows):
         actual_returns = window["labels"]
         portfolio_return = np.dot(weights, actual_returns)
-        new_value = portfolio_values[-1] * (1 + portfolio_return / 100)
 
-        current_peak = (
-            max(portfolio_values) if len(portfolio_values) > 0 else initial_capital
-        )
-        current_peak = max(current_peak, new_value)
-        dd = (new_value - current_peak) / current_peak
+        # ✅ 포트폴리오 가치 업데이트
+        current_value *= 1 + portfolio_return / 100
 
-        portfolio_values.append(new_value)
+        # ✅ 누적 최고점 업데이트
+        peak = max(peak, current_value)
+
+        # ✅ Drawdown 계산 (peak 대비 하락률)
+        dd = (current_value - peak) / peak
+
+        portfolio_values.append(current_value)
         dates.append(window["date"])
 
         ts_data["return"].append(portfolio_return)
-        ts_data["portfolio_value"].append(new_value)
+        ts_data["portfolio_value"].append(current_value)
         ts_data["drawdown"].append(dd)
-        ts_data["turnover"].append(0.0)
+        ts_data["turnover"].append(0.0)  # Buy & Hold는 거래비용 없음
 
     metrics = calculate_metrics(ts_data, dates, "1/N Buy & Hold")
 
     return {
         "dates": dates,
-        "portfolio_values": portfolio_values[1:],
-        "final_capital": portfolio_values[-1],
-        "cumulative_return": (portfolio_values[-1] / initial_capital - 1) * 100,
+        "portfolio_values": portfolio_values,  # ✅ 슬라이싱 제거
+        "final_capital": current_value,  # ✅ 마지막 값 직접 사용
+        "cumulative_return": (current_value / initial_capital - 1) * 100,
         "trade_logs": trade_logs,
         "ts_data": ts_data,
         "metrics": metrics,
