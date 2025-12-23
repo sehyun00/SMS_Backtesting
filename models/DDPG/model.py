@@ -224,27 +224,32 @@ class DDPGAgent:
         current_q = self.critic(states, actions)
         critic_loss = F.mse_loss(current_q, target_q)
 
+        # NaN Check
+        if torch.isnan(critic_loss):
+            return 0.0, 0.0
+
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
+        # ✅ Gradient Clipping
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 1.0)
         self.critic_optimizer.step()
 
         # Actor 업데이트
-
-        # actor_loss = -self.critic(states, self.actor(states)).mean()
-
-        # self.actor_optimizer.zero_grad()
-        # actor_loss.backward()
-
-        # 변경
-        new_actions, entropy = self.actor(states)  # ⭐
+        new_actions, entropy = self.actor(states)
         actor_loss = -self.critic(states, new_actions).mean()
 
         # ⭐ 엔트로피 추가
         entropy_bonus = -self.entropy_coef * entropy.mean()
         total_actor_loss = actor_loss + entropy_bonus
 
+        # NaN Check
+        if torch.isnan(total_actor_loss):
+            return critic_loss.item(), 0.0
+
         self.actor_optimizer.zero_grad()
-        total_actor_loss.backward()  # ⭐
+        total_actor_loss.backward()
+        # ✅ Gradient Clipping
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
         self.actor_optimizer.step()
 
         # Target Soft Update

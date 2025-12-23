@@ -9,6 +9,9 @@ import pandas as pd
 import torch
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import warnings
@@ -41,6 +44,22 @@ class DDPGDataset:
         self.window_size = window_size
         self.feature_cols = feature_cols
 
+        # ✅ 결측치 처리
+        train_nan_count = train_df.isna().sum().sum()
+        test_nan_count = test_df.isna().sum().sum()
+
+        if train_nan_count > 0:
+            print(
+                f"⚠️ [DDPGDataset] Train Data NaN Found: {train_nan_count} -> Fill with 0"
+            )
+            train_df = train_df.fillna(0)
+
+        if test_nan_count > 0:
+            print(
+                f"⚠️ [DDPGDataset] Test Data NaN Found: {test_nan_count} -> Fill with 0"
+            )
+            test_df = test_df.fillna(0)
+
         # 날짜 변환
         train_df["Date"] = pd.to_datetime(train_df["Date"])
         test_df["Date"] = pd.to_datetime(test_df["Date"])
@@ -63,17 +82,12 @@ class DDPGDataset:
             .reset_index()
         )
 
-        # ✅ 정규화 전에 원본 수익률 저장
+        # ✅ Momentum1M을 레이블로만 사용 (정규화 제외)
         self.train_monthly["Return_Raw"] = self.train_monthly["Momentum1M"].copy()
         self.test_monthly["Return_Raw"] = self.test_monthly["Momentum1M"].copy()
 
-        # ✅ feature_cols에서 Momentum1M 제거 (중복 방지)
-        if "Momentum1M" in self.feature_cols:
-            self.feature_cols_for_norm = [
-                c for c in self.feature_cols if c != "Momentum1M"
-            ]
-        else:
-            self.feature_cols_for_norm = self.feature_cols.copy()
+        # ✅ 정규화할 특성 (Momentum1M 제외)
+        self.norm_cols = [c for c in self.feature_cols if c != "Momentum1M"]
 
         # 학습 데이터 기준으로 정규화
         self._fit_scaler_on_train_data()
@@ -88,18 +102,15 @@ class DDPGDataset:
         print(f"   📉 테스트: {len(self.test_windows)}개월")
 
     def _fit_scaler_on_train_data(self):
-        """학습 데이터로만 Scaler fit (Return_Raw 제외)"""
-        # ✅ Momentum1M을 제외한 특성만 정규화
-        norm_cols = [c for c in self.feature_cols if c != "Momentum1M"]
-
+        """학습 데이터로만 Scaler fit (Momentum1M 제외)"""
         self.scaler = StandardScaler()
-        self.scaler.fit(self.train_monthly[norm_cols].values)
+        self.scaler.fit(self.train_monthly[self.norm_cols].values)
 
-        self.train_monthly[norm_cols] = self.scaler.transform(
-            self.train_monthly[norm_cols].values
+        self.train_monthly[self.norm_cols] = self.scaler.transform(
+            self.train_monthly[self.norm_cols].values
         )
-        self.test_monthly[norm_cols] = self.scaler.transform(
-            self.test_monthly[norm_cols].values
+        self.test_monthly[self.norm_cols] = self.scaler.transform(
+            self.test_monthly[self.norm_cols].values
         )
         print(f"   ✅ 정규화 완료 (학습 데이터 기준)")
 
@@ -123,19 +134,23 @@ class DDPGDataset:
                 is_active = not stock_data[stock_data["Date"] == target_date].empty
 
                 if is_active:
-                    norm_cols = [c for c in self.feature_cols if c != "Momentum1M"]
-                    vals = stock_data[norm_cols].values
+                    # ✅ 전체 특성 사용 (Momentum1M 포함)
+                    vals = stock_data[self.feature_cols].values
 
                     if len(vals) < self.window_size:
-                        pad = np.zeros((self.window_size - len(vals), len(norm_cols)))
+                        pad = np.zeros(
+                            (self.window_size - len(vals), len(self.feature_cols))
+                        )
                         vals = np.vstack([pad, vals])
                     features.append(vals)
                     active_mask.append(True)
                 else:
-                    norm_cols = [c for c in self.feature_cols if c != "Momentum1M"]
-                    features.append(np.zeros((self.window_size, len(norm_cols))))
+                    features.append(
+                        np.zeros((self.window_size, len(self.feature_cols)))
+                    )
                     active_mask.append(False)
 
+            # ✅ 레이블은 Return_Raw 사용
             labels = []
             for symbol in symbols:
                 val = next_df[next_df["Symbol"] == symbol]["Return_Raw"].values
@@ -203,15 +218,15 @@ class PortfolioEnv:
         window = self.windows[self.current_step]
         returns = window["labels"]
 
-        # 1. 포트폴리오 수익률 (Gross Return)
+        # 1. 포트폴리오 수익률
         portfolio_return_pct = np.dot(action, returns)
         portfolio_return = portfolio_return_pct / 100.0
 
-        # 2. 거래비용 (Transaction Cost)
+        # 2. 거래비용
         turnover = np.sum(np.abs(action - self.prev_weights))
         transaction_cost = turnover * self.cost_bps
 
-        # 3. 순수익률 (Net Return)
+        # 3. 순수익률
         net_return = portfolio_return - transaction_cost
 
         # 4. 포트폴리오 가치 업데이트
@@ -220,28 +235,19 @@ class PortfolioEnv:
         self.current_step += 1
         done = self.current_step >= self.n_steps
 
-        # 보상 함수 (CRRA Utility) - 안전한 계산
-        safe_return = np.clip(net_return, -0.99, 10.0)  # 극단값 제한
+        # ✅ 새로운 보상 함수: 단순하고 직관적
+        # 기본 보상: 월간 수익률 (%)
+        base_reward = portfolio_return_pct
 
-        if abs(self.gamma - 1.0) < 1e-6:  # gamma = 1 (로그 효용)
-            reward = np.log(1.0 + safe_return)
-        else:  # gamma ≠ 1 (CRRA)
-            exponent = 1.0 - self.gamma
-            base_value = 1.0 + safe_return
+        # 거래 비용 페널티 (bps -> % 변환)
+        cost_penalty = turnover * self.cost_bps * 10000  # 5bps = 0.5%
 
-            # 안전한 거듭제곱 계산
-            if base_value > 0:
-                utility = (base_value**exponent - 1.0) / exponent
-            else:
-                utility = -10.0  # 큰 페널티
+        # 최종 보상
+        reward = base_reward - cost_penalty
 
-            reward = utility
+        # 극단값 방지
+        reward = np.clip(reward, -50, 50)
 
-        # NaN 체크 및 대체
-        if np.isnan(reward) or np.isinf(reward):
-            reward = -10.0
-
-        # 다음 스텝을 위해 가중치 저장
         self.prev_weights = action
 
         next_state = (
@@ -255,6 +261,7 @@ class PortfolioEnv:
             "date": window["date"],
             "turnover": turnover,
             "cost": transaction_cost,
+            "raw_return": portfolio_return_pct,  # 디버깅용
         }
 
         return next_state, reward, done, info
@@ -436,33 +443,32 @@ def run_ddpg_rebalancing(
 # ============ 학습 함수 (Hybrid 방식 적용) ============
 
 
-def train_ddpg(agent, env, num_episodes=800, patience=100):
+def train_ddpg(agent, env, num_episodes=800, patience=100, episode_length=24):
     """
-    DDPG 학습 with Early Stopping
-    (Hybrid TGNN-DDPG 방식 적용)
+    episode_length: 각 에피소드당 step 수 (기본 24개월 = 2년)
     """
     episode_rewards = []
     best_reward = -float("inf")
     no_improve_count = 0
     best_model_state = None
 
-    # 동적 노이즈 파라미터 (Hybrid 방식)
     noise_start = 0.3
     noise_end = 0.05
     noise_decay = (noise_start - noise_end) / num_episodes
 
     print(f"\n총 {num_episodes} 에피소드 학습 시작...")
-    print(f"각 에피소드 = {env.n_steps}개월 거래")
+    print(f"각 에피소드 = {episode_length}개월 거래")
+    print(f"전체 학습 데이터: {env.n_steps}개월")
     print(f"Early Stopping: Patience={patience}\n")
 
     for episode in range(num_episodes):
-        state = env.reset()
+        state = env.reset()  # ✅ 랜덤 시작점
         episode_reward = 0
-
-        # 동적 노이즈 감소 (Hybrid 방식)
         noise_std = max(noise_end, noise_start - episode * noise_decay)
 
-        while True:
+        # ✅ episode_length만큼만 진행
+        steps_taken = 0
+        while steps_taken < episode_length and env.current_step < env.n_steps:
             action = agent.select_action(state, noise_std=noise_std)
             next_state, reward, done, info = env.step(action)
             agent.replay_buffer.push(state, action, reward, next_state, done)
@@ -472,6 +478,7 @@ def train_ddpg(agent, env, num_episodes=800, patience=100):
 
             episode_reward += reward
             state = next_state
+            steps_taken += 1
 
             if done:
                 break
