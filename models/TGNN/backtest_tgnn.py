@@ -9,6 +9,9 @@ import pandas as pd
 import torch
 from pathlib import Path
 from torch.utils.data import DataLoader
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import sys
 import os
@@ -35,6 +38,7 @@ plt.rcParams["font.family"] = font_name
 plt.rcParams["axes.unicode_minus"] = False
 
 # ============ Dataset & Model 재사용 ============
+
 
 class TGNN_Dataset(TGNNDataset):
     def _create_windows(self):
@@ -64,12 +68,16 @@ class TGNN_Dataset(TGNNDataset):
                 if is_active:
                     vals = stock_data[self.feature_cols].values
                     if len(vals) < self.window_size:
-                        pad = np.zeros((self.window_size - len(vals), len(self.feature_cols)))
+                        pad = np.zeros(
+                            (self.window_size - len(vals), len(self.feature_cols))
+                        )
                         vals = np.vstack([pad, vals])
                     features.append(vals)
                     active_mask.append(True)
                 else:
-                    features.append(np.zeros((self.window_size, len(self.feature_cols))))
+                    features.append(
+                        np.zeros((self.window_size, len(self.feature_cols)))
+                    )
                     active_mask.append(False)
 
             adj_matrix = self._create_masked_graph(
@@ -80,10 +88,18 @@ class TGNN_Dataset(TGNNDataset):
             labels_1m, labels_3m, labels_6m, labels_12m = [], [], [], []
             for symbol in self.symbols:
                 next_stock = next_df[next_df["Symbol"] == symbol]
-                labels_1m.append(next_stock["Momentum1M"].values[0] if len(next_stock) > 0 else 0.0)
-                labels_3m.append(next_stock["Momentum3M"].values[0] if len(next_stock) > 0 else 0.0)
-                labels_6m.append(next_stock["Momentum6M"].values[0] if len(next_stock) > 0 else 0.0)
-                labels_12m.append(next_stock["Momentum12M"].values[0] if len(next_stock) > 0 else 0.0)
+                labels_1m.append(
+                    next_stock["Momentum1M"].values[0] if len(next_stock) > 0 else 0.0
+                )
+                labels_3m.append(
+                    next_stock["Momentum3M"].values[0] if len(next_stock) > 0 else 0.0
+                )
+                labels_6m.append(
+                    next_stock["Momentum6M"].values[0] if len(next_stock) > 0 else 0.0
+                )
+                labels_12m.append(
+                    next_stock["Momentum12M"].values[0] if len(next_stock) > 0 else 0.0
+                )
 
             windows.append(
                 {
@@ -112,10 +128,14 @@ class TGNN_Dataset(TGNNDataset):
             "active_mask": torch.BoolTensor(w["active_mask"]),
         }
 
+
 import torch.nn as nn
 
+
 class TGNNModel(BaseTGNNModel):
-    def __init__(self, num_features, hidden_dims=[128, 128, 64], num_heads=8, num_stocks=10):
+    def __init__(
+        self, num_features, hidden_dims=[128, 128, 64], num_heads=8, num_stocks=10
+    ):
         super().__init__(
             num_features=num_features,
             hidden_dims=hidden_dims,
@@ -171,7 +191,9 @@ class TGNNModel(BaseTGNNModel):
 
         return predictions, node_embeddings
 
+
 # ============ 시각화 ============
+
 
 def plot_performance(strategies, save_dir):
     plt.figure(figsize=(14, 7))
@@ -196,7 +218,9 @@ def plot_performance(strategies, save_dir):
     plt.close()
     print(f"✅ 그래프 저장: {save_dir / 'comparison_graph.png'}")
 
+
 # ============ main (백테스트만) ============
+
 
 def main():
     print("=" * 60)
@@ -270,7 +294,9 @@ def main():
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
 
     # 백테스트
-    config = BacktestConfig(initial_capital=10_000_000, cost_bps=10.0, top_k=5, weighting_method="equal")
+    config = BacktestConfig(
+        initial_capital=10_000_000, cost_bps=10.0, top_k=5, weighting_method="equal"
+    )
 
     all_strategies = {}
     all_metrics = {}
@@ -306,7 +332,9 @@ def main():
     print("=" * 60)
     print(df_res.to_string(index=False))
 
-    df_res.to_csv(RESULTS_DIR / "comparison_metrics.csv", index=False, encoding="utf-8-sig")
+    df_res.to_csv(
+        RESULTS_DIR / "comparison_metrics.csv", index=False, encoding="utf-8-sig"
+    )
     print(f"\n✅ 저장: comparison_metrics.csv")
 
     detailed_rows = []
@@ -331,7 +359,9 @@ def main():
         detailed_rows.append(row)
 
     df_detailed = pd.DataFrame(detailed_rows)
-    df_detailed.to_csv(RESULTS_DIR / "metrics_comparison.csv", index=False, encoding="utf-8-sig")
+    df_detailed.to_csv(
+        RESULTS_DIR / "metrics_comparison.csv", index=False, encoding="utf-8-sig"
+    )
     print("✅ 저장: metrics_comparison.csv (상세 메트릭)")
 
     freq_map = {
@@ -350,9 +380,10 @@ def main():
 
     plot_performance(all_strategies, RESULTS_DIR)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"✅ 완료! 결과 폴더: {RESULTS_DIR}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
+
 
 if __name__ == "__main__":
     main()
