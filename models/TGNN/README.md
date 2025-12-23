@@ -114,9 +114,7 @@ models/TGNN/
 
 TGNN Multi-Head 모델을 학습하고, 모델 가중치 및 스케일러를 저장합니다.
 
-cd models/TGNN
-
-python train_tgnn.py
+python -m models.TGNN.train_tgnn
 
 - 생성 파일:
   - `results/01_TGNN_Only/best_tgnn_multi.pth`
@@ -126,9 +124,7 @@ python train_tgnn.py
 
 학습된 TGNN 모델을 이용해 Buy & Hold 대비 TGNN 전략 성과를 비교합니다.
 
-cd models/TGNN
-
-python backtest_tgnn.py
+python -m models.TGNN.backtest_tgnn
 
 - 생성 파일(예시):
   - `results/01_TGNN_Only/comparison_metrics.csv`
