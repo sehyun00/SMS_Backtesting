@@ -342,9 +342,11 @@ def main():
         if col in test_df.columns and col in train_mean:
             test_df[col] = (test_df[col] - train_mean[col]) / (train_std[col] + 1e-8)
 
+    # ✅ 2단계: 테스트 데이터 Momentum을 소수로 변환
     for mom_col in momentum_cols:
         if mom_col in test_df.columns:
-            test_df[mom_col] = test_df[mom_col].clip(-100, 100)
+            test_df[mom_col] = test_df[mom_col] / 100.0  # % → 소수
+            test_df[mom_col] = test_df[mom_col].clip(-0.5, 0.5)  # -50% ~ 50%
 
     symbols = sorted(test_df["Symbol"].unique())
     print(f"종목 수(테스트): {len(symbols)}")
@@ -369,7 +371,6 @@ def main():
         num_stocks=len(symbols),
     )
     
-    # [복구] 재학습 완료로 필터링 불필요
     model.load_state_dict(torch.load(model_path, map_location="cpu"), strict=False)
 
     # 백테스트
