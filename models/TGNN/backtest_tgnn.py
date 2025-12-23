@@ -167,9 +167,12 @@ class TGNNModel(BaseTGNNModel):
 
     def _make_predictor(self, hidden_dim):
         return nn.Sequential(
-            nn.Linear(hidden_dim, 32),
+            nn.Linear(hidden_dim, 64),   
             nn.ReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(0.2),
+            nn.Linear(64, 32),            
+            nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(32, 1),
         )
 
@@ -353,7 +356,7 @@ def main():
         num_heads=8,
         num_stocks=len(symbols),
     )
-    model.load_state_dict(torch.load(model_path, map_location="cpu"))
+    model.load_state_dict(torch.load(model_path, map_location="cpu"), strict=False)
 
     # 백테스트
     config = BacktestConfig(

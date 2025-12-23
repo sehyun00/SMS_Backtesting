@@ -65,7 +65,20 @@ class Backtester:
         """배열을 확률 분포로 변환"""
         e_x = np.exp(x - np.max(x))
         return e_x / e_x.sum()
-    
+    # backtester.py에 Softmax 가중치 추가
+    def allocate_weights_softmax(self, predictions, active_mask):
+        """예측값 기반 Softmax 가중치"""
+        valid_pred = predictions[active_mask]
+        if len(valid_pred) == 0:
+            return np.array([])
+        
+        # Temperature scaling
+        temp = 2.0
+        exp_pred = np.exp(valid_pred / temp)
+        weights = exp_pred / exp_pred.sum()
+        
+        return weights
+
     def run(self, rebalance_freq: str = "monthly", benchmark_weights: np.ndarray = None) -> Dict:
         """
         백테스팅 실행
