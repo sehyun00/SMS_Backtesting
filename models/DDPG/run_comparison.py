@@ -63,9 +63,17 @@ class DDPGDataset:
             .reset_index()
         )
 
-        # 원본 수익률 보존
+        # ✅ 정규화 전에 원본 수익률 저장
         self.train_monthly["Return_Raw"] = self.train_monthly["Momentum1M"].copy()
         self.test_monthly["Return_Raw"] = self.test_monthly["Momentum1M"].copy()
+
+        # ✅ feature_cols에서 Momentum1M 제거 (중복 방지)
+        if "Momentum1M" in self.feature_cols:
+            self.feature_cols_for_norm = [
+                c for c in self.feature_cols if c != "Momentum1M"
+            ]
+        else:
+            self.feature_cols_for_norm = self.feature_cols.copy()
 
         # 학습 데이터 기준으로 정규화
         self._fit_scaler_on_train_data()
@@ -80,15 +88,18 @@ class DDPGDataset:
         print(f"   📉 테스트: {len(self.test_windows)}개월")
 
     def _fit_scaler_on_train_data(self):
-        """학습 데이터로만 Scaler fit"""
-        self.scaler = StandardScaler()
-        self.scaler.fit(self.train_monthly[self.feature_cols].values)
+        """학습 데이터로만 Scaler fit (Return_Raw 제외)"""
+        # ✅ Momentum1M을 제외한 특성만 정규화
+        norm_cols = [c for c in self.feature_cols if c != "Momentum1M"]
 
-        self.train_monthly[self.feature_cols] = self.scaler.transform(
-            self.train_monthly[self.feature_cols].values
+        self.scaler = StandardScaler()
+        self.scaler.fit(self.train_monthly[norm_cols].values)
+
+        self.train_monthly[norm_cols] = self.scaler.transform(
+            self.train_monthly[norm_cols].values
         )
-        self.test_monthly[self.feature_cols] = self.scaler.transform(
-            self.test_monthly[self.feature_cols].values
+        self.test_monthly[norm_cols] = self.scaler.transform(
+            self.test_monthly[norm_cols].values
         )
         print(f"   ✅ 정규화 완료 (학습 데이터 기준)")
 
@@ -112,18 +123,17 @@ class DDPGDataset:
                 is_active = not stock_data[stock_data["Date"] == target_date].empty
 
                 if is_active:
-                    vals = stock_data[self.feature_cols].values
+                    norm_cols = [c for c in self.feature_cols if c != "Momentum1M"]
+                    vals = stock_data[norm_cols].values
+
                     if len(vals) < self.window_size:
-                        pad = np.zeros(
-                            (self.window_size - len(vals), len(self.feature_cols))
-                        )
+                        pad = np.zeros((self.window_size - len(vals), len(norm_cols)))
                         vals = np.vstack([pad, vals])
                     features.append(vals)
                     active_mask.append(True)
                 else:
-                    features.append(
-                        np.zeros((self.window_size, len(self.feature_cols)))
-                    )
+                    norm_cols = [c for c in self.feature_cols if c != "Momentum1M"]
+                    features.append(np.zeros((self.window_size, len(norm_cols))))
                     active_mask.append(False)
 
             labels = []
@@ -172,6 +182,8 @@ class PortfolioEnv:
         self.n_stocks = len(self.symbols)
         self.prev_weights = np.zeros(self.n_stocks)
 
+        self.state_dim = self.windows[0]["features"][:, -1, :].flatten().shape[0]
+
         # Academic Parameters
         self.gamma = 2.0  # Risk Aversion Coefficient (2.0: Moderate)
         self.cost_bps = 0.0005  # 5bps (0.05%) Transaction Cost
@@ -208,11 +220,26 @@ class PortfolioEnv:
         self.current_step += 1
         done = self.current_step >= self.n_steps
 
-        # 보상 함수 (CRRA Utility)
-        safe_return = max(net_return, -0.99)
-        exponent = 1.0 - self.gamma
-        utility = ((1.0 + safe_return) ** exponent) / exponent
-        reward = utility
+        # 보상 함수 (CRRA Utility) - 안전한 계산
+        safe_return = np.clip(net_return, -0.99, 10.0)  # 극단값 제한
+
+        if abs(self.gamma - 1.0) < 1e-6:  # gamma = 1 (로그 효용)
+            reward = np.log(1.0 + safe_return)
+        else:  # gamma ≠ 1 (CRRA)
+            exponent = 1.0 - self.gamma
+            base_value = 1.0 + safe_return
+
+            # 안전한 거듭제곱 계산
+            if base_value > 0:
+                utility = (base_value**exponent - 1.0) / exponent
+            else:
+                utility = -10.0  # 큰 페널티
+
+            reward = utility
+
+        # NaN 체크 및 대체
+        if np.isnan(reward) or np.isinf(reward):
+            reward = -10.0
 
         # 다음 스텝을 위해 가중치 저장
         self.prev_weights = action
@@ -220,7 +247,7 @@ class PortfolioEnv:
         next_state = (
             self._get_state(self.current_step)
             if not done
-            else np.zeros(len(self.symbols) * len(self.features))
+            else np.zeros(self.state_dim, dtype=np.float32)
         )
 
         info = {
@@ -335,7 +362,9 @@ def run_buy_and_hold(test_windows, test_symbols):
     }
 
 
-def run_ddpg_rebalancing(agent, dataset, test_windows, test_symbols, rebalance_freq="monthly"):
+def run_ddpg_rebalancing(
+    agent, dataset, test_windows, test_symbols, rebalance_freq="monthly"
+):
     """DDPG 리밸런싱"""
     freq_map = {"monthly": 1, "quarterly": 3, "semiannual": 6, "annual": 12}
     interval = freq_map[rebalance_freq]
@@ -696,11 +725,11 @@ def main(mode="compare"):
     print("=" * 60)
     print("DDPG 데이터셋 준비 (train_data.csv / test_data.csv)")
     print("=" * 60)
-    
+
     # 데이터 로드
     train_df = pd.read_csv(TRAIN_DATA_PATH)
     test_df = pd.read_csv(TEST_DATA_PATH)
-    
+
     # 특성 컬럼 정의
     feature_cols = [
         "Close",
@@ -724,14 +753,14 @@ def main(mode="compare"):
         "RMW",
         "CMA",
     ]
-    
+
     # 데이터셋 생성
     dataset = DDPGDataset(
         train_df=train_df, test_df=test_df, window_size=12, feature_cols=feature_cols
     )
 
     num_stocks = len(dataset.train_symbols)
-    num_features = len(feature_cols)
+    num_features = len([c for c in feature_cols if c != "Momentum1M"])
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Hybrid 방식과 동일한 학습률 적용
@@ -762,7 +791,10 @@ def main(mode="compare"):
 
         # 1. 메인 학습 (Early Stopping 적용)
         train_rewards, best_reward = train_ddpg(
-            agent, train_env, num_episodes=800, patience=100  # Hybrid와 동일
+            agent,
+            train_env,
+            num_episodes=800,
+            patience=100,  # Hybrid와 동일
         )
 
         # 2. Fine-tuning
@@ -778,9 +810,7 @@ def main(mode="compare"):
     elif mode == "compare":
         if model_path.exists():
             try:
-                agent.actor.load_state_dict(
-                    torch.load(model_path, map_location=DEVICE)
-                )
+                agent.actor.load_state_dict(torch.load(model_path, map_location=DEVICE))
                 print("✅ 기존 모델 로드 완료")
             except RuntimeError:
                 print("⚠️ 모델 구조 불일치. 재학습 시작...")
@@ -814,10 +844,18 @@ def main(mode="compare"):
         test_symbols = dataset.test_symbols
 
         buy_and_hold = run_buy_and_hold(test_windows, test_symbols)
-        monthly = run_ddpg_rebalancing(agent, dataset, test_windows, test_symbols, "monthly")
-        quarterly = run_ddpg_rebalancing(agent, dataset, test_windows, test_symbols, "quarterly")
-        semiannual = run_ddpg_rebalancing(agent, dataset, test_windows, test_symbols, "semiannual")
-        annual = run_ddpg_rebalancing(agent, dataset, test_windows, test_symbols, "annual")
+        monthly = run_ddpg_rebalancing(
+            agent, dataset, test_windows, test_symbols, "monthly"
+        )
+        quarterly = run_ddpg_rebalancing(
+            agent, dataset, test_windows, test_symbols, "quarterly"
+        )
+        semiannual = run_ddpg_rebalancing(
+            agent, dataset, test_windows, test_symbols, "semiannual"
+        )
+        annual = run_ddpg_rebalancing(
+            agent, dataset, test_windows, test_symbols, "annual"
+        )
 
         plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_dir)
 
