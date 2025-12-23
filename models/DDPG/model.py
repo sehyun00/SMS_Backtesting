@@ -6,32 +6,51 @@ from collections import deque
 import random
 
 
-# ==================== 1. Temporal Attention Module ====================
+# ==================== 1. Enhanced Temporal Attention Module ====================
 class TemporalAttention(nn.Module):
-    """시계열 데이터의 중요한 시점에 집중하는 Attention 메커니즘"""
+    """강화된 시계열 Attention 메커니즘 (Multi-head 증가 + Residual)"""
 
-    def __init__(self, hidden_dim, num_heads=4, dropout=0.1):
+    def __init__(self, hidden_dim, num_heads=8, dropout=0.15):
         super(TemporalAttention, self).__init__()
+        # Multi-head 수 증가: 4 -> 8 (더 다양한 패턴 학습)
         self.attention = nn.MultiheadAttention(
             hidden_dim, num_heads, dropout=dropout, batch_first=True
         )
-        self.layer_norm = nn.LayerNorm(hidden_dim)
+        self.layer_norm1 = nn.LayerNorm(hidden_dim)
+        self.layer_norm2 = nn.LayerNorm(hidden_dim)
         self.dropout = nn.Dropout(dropout)
+        
+        # Feed-forward network with residual connection
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 4),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim * 4, hidden_dim),
+            nn.Dropout(dropout)
+        )
 
     def forward(self, x):
         # x: (Batch, Seq_Len, Hidden_Dim)
+        
+        # Multi-head Attention with residual
         attn_out, attn_weights = self.attention(x, x, x)
-        x = self.layer_norm(x + self.dropout(attn_out))  # Residual connection
+        x = self.layer_norm1(x + self.dropout(attn_out))
+        
+        # Feed-forward with residual
+        ffn_out = self.ffn(x)
+        x = self.layer_norm2(x + ffn_out)
+        
         return x, attn_weights
 
 
-# ==================== 2. Enhanced Factor Encoder with LSTM ====================
+# ==================== 2. Enhanced Factor Encoder with Residual LSTM ====================
 class TemporalFactorEncoder(nn.Module):
-    """시계열 팩터 분석을 위한 LSTM 기반 인코더"""
+    """Residual Connection이 추가된 LSTM 기반 인코더"""
 
-    def __init__(self, num_features, hidden_dim=64, num_layers=2, dropout=0.2):
+    def __init__(self, num_features, hidden_dim=64, num_layers=2, dropout=0.15):
         super(TemporalFactorEncoder, self).__init__()
         self.hidden_dim = hidden_dim
+        self.num_features = num_features
 
         # LSTM for temporal processing
         self.lstm = nn.LSTM(
@@ -42,53 +61,75 @@ class TemporalFactorEncoder(nn.Module):
             dropout=dropout if num_layers > 1 else 0,
         )
 
-        # Additional feature extraction
-        self.feature_net = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
+        # Input projection for residual connection
+        self.input_proj = nn.Linear(num_features, hidden_dim) if num_features != hidden_dim else None
+        
+        # Enhanced feature extraction with residual
+        self.feature_net1 = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.LayerNorm(hidden_dim * 2),
+            nn.GELU(),
             nn.Dropout(dropout),
         )
+        
+        self.feature_net2 = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.Dropout(dropout),
+        )
+        
+        self.layer_norm = nn.LayerNorm(hidden_dim)
 
     def forward(self, x):
         # x: (Batch, Seq_Len, Num_Features)
+        batch_size = x.shape[0]
+        
+        # Store input for residual
+        if self.input_proj is not None:
+            residual = self.input_proj(x[:, -1, :])  # Use last timestep
+        else:
+            residual = x[:, -1, :]
+        
+        # LSTM processing
         lstm_out, (h_n, c_n) = self.lstm(x)
-
-        # Use last hidden state
         last_hidden = lstm_out[:, -1, :]  # (Batch, Hidden_Dim)
-
-        # Additional processing
-        features = self.feature_net(last_hidden)
-        return features
+        
+        # Feature extraction with residual
+        features = self.feature_net1(last_hidden)
+        features = self.feature_net2(features)
+        
+        # Residual connection
+        output = self.layer_norm(features + residual)
+        
+        return output
 
 
 # ==================== 3. Shared Factor Encoder (Legacy Support) ====================
 class SharedFactorEncoder(nn.Module):
     """모든 종목에 공유되는 팩터 분석 레이어 (Universal Rules Learner)"""
 
-    def __init__(self, num_features, hidden_dim=64, dropout=0.2):
+    def __init__(self, num_features, hidden_dim=64, dropout=0.15):
         super(SharedFactorEncoder, self).__init__()
         self.net = nn.Sequential(
             nn.Linear(num_features, hidden_dim),
             nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
         )
 
     def forward(self, x):
         # Input: (Batch, Num_Stocks, Num_Features)
-        # Linear layer applies to the last dimension
         return self.net(x)
         # Output: (Batch, Num_Stocks, Hidden_Dim)
 
 
 # ==================== 4. Enhanced Actor Network ====================
 class Actor(nn.Module):
-    """개선된 포트폴리오 비중 결정 네트워크 (Temporal Attention + LSTM)"""
+    """개선된 포트폴리오 비중 결정 네트워크 (Enhanced Attention + Residual)"""
 
     def __init__(
         self,
@@ -99,7 +140,7 @@ class Actor(nn.Module):
         min_weight=0.02,
         max_weight=0.30,
         use_temporal=True,
-        dropout=0.2,
+        dropout=0.15,
     ):
         super(Actor, self).__init__()
         self.num_stocks = num_stocks
@@ -110,40 +151,46 @@ class Actor(nn.Module):
         self.use_temporal = use_temporal
 
         if use_temporal:
-            # Temporal processing with LSTM
+            # Temporal processing with enhanced LSTM
             self.temporal_encoder = TemporalFactorEncoder(
                 num_features, hidden_dim=64, dropout=dropout
             )
 
-            # Attention mechanism
-            self.attention = TemporalAttention(64, num_heads=4, dropout=dropout)
+            # Enhanced attention mechanism (8 heads)
+            self.attention = TemporalAttention(64, num_heads=8, dropout=dropout)
 
-            # Global context integration
+            # Global context integration with residual
             input_dim = num_stocks * 64
         else:
-            # Legacy mode (backward compatibility)
+            # Legacy mode
             self.encoder = SharedFactorEncoder(num_features, 64, dropout=dropout)
             input_dim = num_stocks * 64
 
-        # Portfolio weight generation
-        self.global_net = nn.Sequential(
+        # Portfolio weight generation with residual connections
+        self.global_net1 = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
+        )
+        
+        self.global_net2 = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, num_stocks),
         )
+        
+        self.output_layer = nn.Linear(hidden_dim, num_stocks)
+        
+        # Skip connection projection
+        self.skip_proj = nn.Linear(input_dim, hidden_dim)
 
     def forward(self, state):
         batch_size = state.shape[0]
 
         if self.use_temporal:
             # State: (Batch, Num_Stocks * Window_Size * Num_Features)
-            # Reshape to process temporal information
             x = state.reshape(
                 batch_size, self.num_stocks, self.window_size, self.num_features
             )
@@ -158,21 +205,26 @@ class Actor(nn.Module):
             # Stack: (Batch, Num_Stocks, 64)
             x = torch.stack(stock_features, dim=1)
 
-            # Apply attention across stocks
+            # Apply enhanced attention across stocks
             x, _ = self.attention(x)  # (Batch, Num_Stocks, 64)
 
             # Flatten for global processing
             x = x.reshape(batch_size, -1)
         else:
-            # Legacy mode: use only last timestep
+            # Legacy mode
             x = state.reshape(batch_size, self.num_stocks, -1)
-            # Extract last features
             last_features = x[:, :, -self.num_features :]
             x = self.encoder(last_features)
             x = x.reshape(batch_size, -1)
 
-        # Generate portfolio weights
-        scores = self.global_net(x)
+        # Store input for skip connection
+        skip = self.skip_proj(x)
+        
+        # Generate portfolio weights with residual
+        x = self.global_net1(x)
+        x = self.global_net2(x + skip)  # Residual connection
+        scores = self.output_layer(x)
+        
         weights = F.softmax(scores, dim=-1)
 
         # Apply constraints
@@ -187,7 +239,7 @@ class Actor(nn.Module):
 
 # ==================== 5. Enhanced Critic Network ====================
 class Critic(nn.Module):
-    """개선된 Q-Value 추정 네트워크"""
+    """개선된 Q-Value 추정 네트워크 (Residual Connections)"""
 
     def __init__(
         self,
@@ -197,7 +249,7 @@ class Critic(nn.Module):
         window_size=12,
         hidden_dim=128,
         use_temporal=True,
-        dropout=0.2,
+        dropout=0.15,
     ):
         super(Critic, self).__init__()
         self.num_stocks = num_stocks
@@ -214,18 +266,25 @@ class Critic(nn.Module):
             self.encoder = SharedFactorEncoder(num_features, 64, dropout=dropout)
             input_dim = (num_stocks * 64) + action_dim
 
-        # Q-value estimation network
-        self.net = nn.Sequential(
+        # Q-value estimation network with residual
+        self.net1 = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
+        )
+        
+        self.net2 = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
         )
+        
+        self.output_layer = nn.Linear(hidden_dim, 1)
+        
+        # Skip connection
+        self.skip_proj = nn.Linear(input_dim, hidden_dim)
 
     def forward(self, state, action):
         batch_size = state.shape[0]
@@ -254,9 +313,15 @@ class Critic(nn.Module):
 
         # Combine state and action
         xa = torch.cat([x, action], dim=-1)
-
-        # Estimate Q-value
-        q_value = self.net(xa)
+        
+        # Store for skip connection
+        skip = self.skip_proj(xa)
+        
+        # Estimate Q-value with residual
+        x = self.net1(xa)
+        x = self.net2(x + skip)  # Residual connection
+        q_value = self.output_layer(x)
+        
         return q_value
 
 
