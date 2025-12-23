@@ -30,7 +30,7 @@ class HybridAgent:
         gamma=0.99,
         tau=0.001,
         entropy_coef=0.01,
-        max_concentration=0.15,
+        max_concentration=0.25,  # 🔥 0.15 -> 0.25
         device="cuda",
     ):
         """
@@ -72,11 +72,11 @@ class HybridAgent:
         # ===== Actor Optimizer: Learning Rate Separation =====
         # Strategy:
         # - TGNN/DDPG encoders & heads: Standard lr_actor (1e-4)
-        # - Alpha Network (ensemble_weight_net): 10x slower (1e-5)
+        # - Alpha Network (ensemble_weight_net): 5x faster (5e-5) 🔥 10x → 5x 변경
         #
         # Rationale:
         # - Alpha network controls ensemble weighting between TGNN and DDPG
-        # - Slower learning prevents unstable oscillation between strategies
+        # - Faster learning allows dynamic strategy switching 🔥
         # - Allows TGNN/DDPG to stabilize before alpha adjusts weighting
         self.actor_optimizer = torch.optim.Adam(
             [
@@ -102,7 +102,7 @@ class HybridAgent:
                 },
                 {
                     "params": self.actor.ensemble_weight_net.parameters(),
-                    "lr": lr_actor * 0.1,  # 10x slower (1e-5 when lr_actor=1e-4)
+                    "lr": lr_actor * 0.5,  # 🔥 0.1 -> 0.5 (5배 증가, 5e-5)
                     "name": "alpha_network",
                 },
             ]

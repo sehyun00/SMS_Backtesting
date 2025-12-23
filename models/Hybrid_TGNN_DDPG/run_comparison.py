@@ -40,19 +40,19 @@ class Config:
 
     # ===== 학습 하이퍼파라미터 (README 기준) =====
     MAX_EPISODES: int = 800  # README standard
-    EARLY_STOPPING_PATIENCE: int = 50
+    EARLY_STOPPING_PATIENCE: int = 100  # 🔥 50 -> 100 증가
     BATCH_SIZE: int = 64
     REPLAY_BUFFER_SIZE: int = 10000  # README standard
     MIN_BUFFER_SIZE: int = 512
 
     # 탐색 노이즈 (동적 감소)
-    INITIAL_NOISE_STD: float = 0.2
-    MIN_NOISE_STD: float = 0.01
+    INITIAL_NOISE_STD: float = 0.3  # 🔥 0.2 -> 0.3 증가
+    MIN_NOISE_STD: float = 0.05  # 🔥 0.01 -> 0.05 증가
 
     # 옵티마이저 학습률
     LEARNING_RATE_ACTOR: float = 1e-4
     LEARNING_RATE_CRITIC: float = 1e-3
-    LEARNING_RATE_ALPHA: float = 1e-5  # Alpha Network (10배 느림)
+    LEARNING_RATE_ALPHA: float = 5e-5  # 🔥 1e-5 -> 5e-5 증가
 
     # DDPG 하이퍼파라미터
     GAMMA: float = 0.99  # 할인율
@@ -68,6 +68,7 @@ class Config:
     # 백테스트 설정
     INITIAL_CAPITAL: int = 1_000_000
     WINDOW_SIZE: int = 12
+    MAX_CONCENTRATION: float = 0.25  # 🔥 추가: 최대 집중도 25%
 
     # 리밸런싱 빈도
     REBALANCE_FREQUENCIES: Dict[str, int] = None
@@ -82,7 +83,7 @@ class Config:
         self.RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
         # Noise decay rate: 800 에피소드 기준으로 재계산
-        # (0.2 - 0.01) / 800 = 0.0002375
+        # 🔥 (0.3 - 0.05) / 800 = 0.0003125
         self.NOISE_DECAY_RATE = (
             self.INITIAL_NOISE_STD - self.MIN_NOISE_STD
         ) / self.MAX_EPISODES
@@ -602,8 +603,8 @@ class Portfolio:
         self.num_stocks = num_stocks
         self.weights = np.ones(num_stocks) / num_stocks
 
-        # 기록
-        self.values = [initial_capital]
+        # 🔥 기록 배열
+        self.values = []
         self.returns = []
         self.drawdowns = []
         self.turnovers = []
@@ -616,12 +617,15 @@ class Portfolio:
 
     def update(self, asset_returns: np.ndarray, date: str):
         """자산 수익률 적용 및 포트폴리오 업데이트"""
+        # 🔥 포트폴리오 수익률 계산
         portfolio_return = np.dot(self.weights, asset_returns)
         self.capital *= 1 + portfolio_return
 
+        # Peak 및 Drawdown 업데이트
         self.peak = max(self.peak, self.capital)
         drawdown = (self.capital - self.peak) / self.peak
 
+        # 🔥 모든 값 동시 저장 (길이 일치)
         self.values.append(self.capital)
         self.returns.append(float(portfolio_return))
         self.drawdowns.append(float(drawdown))

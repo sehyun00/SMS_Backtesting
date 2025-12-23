@@ -9,9 +9,9 @@ from .metrics import (
     calculate_risk_adjusted_returns,
 )
 from .constraints import (
-    enforce_weight_constraints,
-    check_constraint_violation,
-    calculate_concentration_metrics,
+    apply_concentration_limit,
+    apply_min_weight_threshold,
+    apply_long_only_constraint,
 )
 
 __all__ = [
@@ -21,7 +21,7 @@ __all__ = [
     "calculate_downside_metrics",
     "calculate_risk_adjusted_returns",
     # Constraints
-    "enforce_weight_constraints",
-    "check_constraint_violation",
-    "calculate_concentration_metrics",
+    "apply_concentration_limit",
+    "apply_min_weight_threshold",
+    "apply_long_only_constraint",
 ]

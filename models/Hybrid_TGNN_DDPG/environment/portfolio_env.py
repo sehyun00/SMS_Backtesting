@@ -147,7 +147,7 @@ class HybridPortfolioEnv:
 
     def _calculate_reward(self, action, returns, features, net_return, turnover):
         """
-        단순화된 리워드 계산 (NaN 방지)
+        개선된 리워드 계산 (리밸런싱 장려)
 
         Args:
             action: 포트폴리오 가중치
@@ -171,10 +171,10 @@ class HybridPortfolioEnv:
         returns = np.nan_to_num(returns, nan=0.0, posinf=1.0, neginf=-1.0)
         net_return = np.clip(net_return, -1.0, 1.0)
 
-        # 초기 단계: 단순 리워드
+        # 초기 단계: 수익률 중심 학습
         if len(self.return_history) < 6:
-            reward = net_return * 100 - turnover * 10.0
-            return np.clip(reward, -100, 100)
+            reward = net_return * 200.0 - turnover * 2.0
+            return np.clip(reward, -200, 200)
 
         # 최근 수익률 배열
         returns_array = np.array(self.return_history[-12:])
@@ -184,49 +184,92 @@ class HybridPortfolioEnv:
         std_return = np.std(returns_array) + 1e-8
 
         # ========== 1. 수익률 보상 ==========
-        return_reward = mean_return * 50.0
+        return_reward = mean_return * 200.0
 
         # ========== 2. 샤프 비율 보상 ==========
         sharpe = mean_return / std_return
         sharpe = np.clip(sharpe, -5, 5)
-        sharpe_reward = sharpe * 20.0
+        sharpe_reward = sharpe * 50.0
 
-        # ========== 3. MDD 페널티 ==========
+        # ========== 3. MDD 페널티 (완화) ==========
         if len(returns_array) >= 12:
             cumulative = np.cumprod(1 + returns_array)
             peak = np.maximum.accumulate(cumulative)
             drawdown = (cumulative - peak) / (peak + 1e-8)
             mdd = abs(np.min(drawdown))
 
-            if mdd > 0.20:
-                mdd_penalty = 100.0 * (mdd - 0.20) ** 2
+            # 단계적 페널티 (더 관대하게)
+            if mdd > 0.40:
+                mdd_penalty = 50.0 * (mdd - 0.40)
+            elif mdd > 0.25:
+                mdd_penalty = 10.0 * (mdd - 0.25)
             else:
                 mdd_penalty = 0
+
+            # MDD 개선 보너스
+            if mdd < 0.15:
+                mdd_penalty = -20.0  # 보너스로 전환
         else:
             mdd_penalty = 0
 
-        # ========== 4. 집중도 페널티 ==========
+        # ========== 4. 집중도 관리 (완화) ==========
         concentration = np.sum(action**2)
-        if concentration > 0.15:
-            concentration_penalty = 200.0 * (concentration - 0.15) ** 2
+
+        # 과도한 집중만 페널티 (0.25 이상)
+        if concentration > 0.25:
+            concentration_penalty = 30.0 * (concentration - 0.25)
         else:
             concentration_penalty = 0
 
-        # ========== 5. 회전율 페널티 ==========
-        turnover_penalty = turnover * 5.0
+        # 적절한 분산 보너스 (0.10-0.20 사이)
+        if 0.10 <= concentration <= 0.20:
+            diversity_bonus = 15.0
+        else:
+            diversity_bonus = 0
 
-        # ========== 최종 리워드 ==========
+        # 🔥 ========== 5. 리밸런싱 변화 보상 (신규) ==========
+        if len(self.return_history) >= 2:
+            # 이전 비중과의 차이 계산
+            weight_change = np.sum(np.abs(action - self.prev_weights))
+
+            # 적절한 변화량에 대한 보상 (5-20% 총 변화)
+            if 0.05 <= weight_change <= 0.20:
+                rebalance_bonus = 30.0
+            elif 0.20 < weight_change <= 0.40:
+                rebalance_bonus = 15.0  # 과도한 변화는 적은 보상
+            else:
+                rebalance_bonus = 0
+        else:
+            rebalance_bonus = 0
+
+        # 🔥 ========== 6. 회전율 페널티 (완화) ==========
+        turnover_penalty = turnover * 0.5  # 2.0 -> 0.5
+
+        # ========== 7. 연속 손실 페널티 ==========
+        if len(returns_array) >= 3:
+            recent_3 = returns_array[-3:]
+            if np.all(recent_3 < 0):
+                consecutive_loss_penalty = 20.0
+            else:
+                consecutive_loss_penalty = 0
+        else:
+            consecutive_loss_penalty = 0
+
+        # 🔥 ========== 최종 리워드 ==========
         reward = (
-            return_reward
-            + sharpe_reward
-            - mdd_penalty
-            - concentration_penalty
-            - turnover_penalty
+            return_reward  # 주요 신호
+            + sharpe_reward  # 위험 조정 수익
+            + diversity_bonus  # 분산 보너스
+            + rebalance_bonus  # 🔥 리밸런싱 보너스 (신규)
+            - mdd_penalty  # MDD 관리
+            - concentration_penalty  # 과도한 집중 방지
+            - turnover_penalty  # 거래 비용 (완화)
+            - consecutive_loss_penalty  # 연속 손실 방지
         )
 
         # 🔥 최종 검증
-        reward = np.nan_to_num(reward, nan=0.0, posinf=100.0, neginf=-100.0)
-        reward = np.clip(reward, -100, 100)
+        reward = np.nan_to_num(reward, nan=0.0, posinf=200.0, neginf=-200.0)
+        reward = np.clip(reward, -200, 200)
 
         return float(reward)
 
