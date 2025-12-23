@@ -1,7 +1,6 @@
 """
 DDPG 학습 & 리밸런싱 빈도별 백테스팅 비교
-- 3년 학습 (2015~2017) / 8년 실전 투자 테스트 (2018~2025) 분리 적용
-- 학습 데이터(2015-2017) 기준으로 정규화하여 Look-ahead Bias 방지
+- train_data.csv / test_data.csv 사용 (Hybrid 모델과 동일)
 - Hybrid TGNN-DDPG 방식 적용: Early Stopping + Fine-tuning
 """
 
@@ -20,9 +19,8 @@ from model import DDPGAgent
 
 # 프로젝트 루트
 ROOT_DIR = Path(__file__).parent.parent.parent
-DATA_PATH = (
-    ROOT_DIR / "data" / "processed_daily_5factor_model_10stocks_10years_20251127.csv"
-)
+TRAIN_DATA_PATH = ROOT_DIR / "data" / "train_data.csv"
+TEST_DATA_PATH = ROOT_DIR / "data" / "test_data.csv"
 
 # 한글 폰트
 plt.rcParams["font.family"] = "Malgun Gothic"
@@ -35,61 +33,67 @@ plt.rcParams["axes.unicode_minus"] = False
 class DDPGDataset:
     """
     DDPG 전용 데이터셋
-    - 2015-2017: 학습 데이터 (Train)
-    - 2018-2025: 테스트 데이터 (Test)
+    - train_data.csv: 학습 데이터
+    - test_data.csv: 테스트 데이터
     """
 
-    def __init__(self, df, window_size=12, feature_cols=None):
-        self.df = df.copy()
-        self.df["Date"] = pd.to_datetime(self.df["Date"])
+    def __init__(self, train_df, test_df, window_size=12, feature_cols=None):
         self.window_size = window_size
-        self.symbols = sorted(df["Symbol"].unique())
         self.feature_cols = feature_cols
 
-        # 1. 월별 리샘플링
-        self.monthly_df = (
-            self.df.set_index("Date")
+        # 날짜 변환
+        train_df["Date"] = pd.to_datetime(train_df["Date"])
+        test_df["Date"] = pd.to_datetime(test_df["Date"])
+
+        # 심볼 추출
+        self.train_symbols = sorted(train_df["Symbol"].unique())
+        self.test_symbols = sorted(test_df["Symbol"].unique())
+
+        # 월별 리샘플링
+        self.train_monthly = (
+            train_df.set_index("Date")
+            .groupby(["Symbol", pd.Grouper(freq="ME")])
+            .last()
+            .reset_index()
+        )
+        self.test_monthly = (
+            test_df.set_index("Date")
             .groupby(["Symbol", pd.Grouper(freq="ME")])
             .last()
             .reset_index()
         )
 
-        # 2. 원본 수익률 보존
-        self.monthly_df["Return_Raw"] = self.monthly_df["Momentum1M"].copy()
+        # 원본 수익률 보존
+        self.train_monthly["Return_Raw"] = self.train_monthly["Momentum1M"].copy()
+        self.test_monthly["Return_Raw"] = self.test_monthly["Momentum1M"].copy()
 
-        # 3. 학습/테스트 분할 시점 설정 (2017년 12월 31일 기준)
-        self.split_date = pd.Timestamp("2017-12-31")
-
-        # 4. 학습 데이터(2015-2017) 기준으로 정규화
+        # 학습 데이터 기준으로 정규화
         self._fit_scaler_on_train_data()
 
-        self.windows = self._create_windows()
+        # 윈도우 생성
+        self.train_windows = self._create_windows(
+            self.train_monthly, self.train_symbols
+        )
+        self.test_windows = self._create_windows(self.test_monthly, self.test_symbols)
 
-        # 5. 분할 인덱스 찾기
-        self.test_start_idx = 0
-        for i, w in enumerate(self.windows):
-            if w["date"] > self.split_date:
-                self.test_start_idx = i
-                break
-
-        print(f"   📊 전체: {len(self.windows)}개월")
-        print(f"   📈 학습: {self.test_start_idx}개월 (~2017)")
-        print(f"   📉 테스트: {len(self.windows) - self.test_start_idx}개월 (2018~)")
+        print(f"   📊 학습: {len(self.train_windows)}개월")
+        print(f"   📉 테스트: {len(self.test_windows)}개월")
 
     def _fit_scaler_on_train_data(self):
-        """2017년까지 데이터로만 Scaler fit"""
-        train_data = self.monthly_df[self.monthly_df["Date"] <= self.split_date]
-
+        """학습 데이터로만 Scaler fit"""
         self.scaler = StandardScaler()
-        self.scaler.fit(train_data[self.feature_cols].values)
+        self.scaler.fit(self.train_monthly[self.feature_cols].values)
 
-        self.monthly_df[self.feature_cols] = self.scaler.transform(
-            self.monthly_df[self.feature_cols].values
+        self.train_monthly[self.feature_cols] = self.scaler.transform(
+            self.train_monthly[self.feature_cols].values
         )
-        print(f"   ✅ 정규화 완료 (2017년 이전 데이터 기준)")
+        self.test_monthly[self.feature_cols] = self.scaler.transform(
+            self.test_monthly[self.feature_cols].values
+        )
+        print(f"   ✅ 정규화 완료 (학습 데이터 기준)")
 
-    def _create_windows(self):
-        dates = sorted(self.monthly_df["Date"].unique())
+    def _create_windows(self, monthly_df, symbols):
+        dates = sorted(monthly_df["Date"].unique())
         windows = []
 
         for i in range(len(dates) - self.window_size):
@@ -97,13 +101,13 @@ class DDPGDataset:
             target_date = window_dates[-1]
             next_date = dates[i + self.window_size]
 
-            window_df = self.monthly_df[self.monthly_df["Date"].isin(window_dates)]
-            next_df = self.monthly_df[self.monthly_df["Date"] == next_date]
+            window_df = monthly_df[monthly_df["Date"].isin(window_dates)]
+            next_df = monthly_df[monthly_df["Date"] == next_date]
 
             features = []
             active_mask = []
 
-            for symbol in self.symbols:
+            for symbol in symbols:
                 stock_data = window_df[window_df["Symbol"] == symbol]
                 is_active = not stock_data[stock_data["Date"] == target_date].empty
 
@@ -123,7 +127,7 @@ class DDPGDataset:
                     active_mask.append(False)
 
             labels = []
-            for symbol in self.symbols:
+            for symbol in symbols:
                 val = next_df[next_df["Symbol"] == symbol]["Return_Raw"].values
                 labels.append(val[0] if len(val) > 0 else 0.0)
 
@@ -138,33 +142,28 @@ class DDPGDataset:
 
         return windows
 
-    def get_state(self, idx):
-        w = self.windows[idx]
+    def get_state(self, windows, idx):
+        w = windows[idx]
         state = w["features"][:, -1, :].flatten()
         return state.astype(np.float32)
 
     def get_train_windows(self):
-        """2017년까지 데이터 반환"""
-        return self.windows[: self.test_start_idx]
+        return self.train_windows
 
     def get_test_windows(self):
-        """2018년 이후 데이터 반환 (실전 투자용)"""
-        return self.windows[self.test_start_idx :]
-
-    def __len__(self):
-        return len(self.windows)
+        return self.test_windows
 
 
 # ============ 포트폴리오 환경 ============
 
 
 class PortfolioEnv:
-    def __init__(self, dataset, windows=None, initial_cash=1_000_000):
+    def __init__(self, dataset, windows, symbols, features, initial_cash=1_000_000):
         self.dataset = dataset
-        self.windows = windows if windows else dataset.windows
+        self.windows = windows
         self.initial_cash = initial_cash
-        self.symbols = dataset.symbols
-        self.features = dataset.feature_cols
+        self.symbols = symbols
+        self.features = features
         self.n_steps = len(self.windows)
         self.current_step = 0
         self.portfolio_value = initial_cash
@@ -281,10 +280,10 @@ def calculate_metrics(returns_dict, dates, strategy_name):
     }
 
 
-def run_buy_and_hold(dataset):
-    """1/N 매수 후 보유 (테스트 기간만)"""
+def run_buy_and_hold(test_windows, test_symbols):
+    """1/N 매수 후 보유"""
     initial_capital = 1_000_000
-    n_stocks = len(dataset.symbols)
+    n_stocks = len(test_symbols)
     weights = np.ones(n_stocks) / n_stocks
 
     portfolio_values = [initial_capital]
@@ -293,8 +292,6 @@ def run_buy_and_hold(dataset):
 
     ts_data = {"return": [], "portfolio_value": [], "drawdown": [], "turnover": []}
 
-    test_windows = dataset.get_test_windows()
-
     if len(test_windows) > 0:
         first_date = test_windows[0]["date"]
         log_entry = {
@@ -302,7 +299,7 @@ def run_buy_and_hold(dataset):
             "Strategy": "1/N Buy & Hold",
             "Type": "Initial Buy",
         }
-        for sym, w in zip(dataset.symbols, weights):
+        for sym, w in zip(test_symbols, weights):
             log_entry[sym] = w
         trade_logs.append(log_entry)
 
@@ -338,8 +335,8 @@ def run_buy_and_hold(dataset):
     }
 
 
-def run_ddpg_rebalancing(agent, dataset, rebalance_freq="monthly"):
-    """DDPG 리밸런싱 (테스트 기간 2018~2025)"""
+def run_ddpg_rebalancing(agent, dataset, test_windows, test_symbols, rebalance_freq="monthly"):
+    """DDPG 리밸런싱"""
     freq_map = {"monthly": 1, "quarterly": 3, "semiannual": 6, "annual": 12}
     interval = freq_map[rebalance_freq]
     strategy_name = f"DDPG ({rebalance_freq})"
@@ -350,23 +347,19 @@ def run_ddpg_rebalancing(agent, dataset, rebalance_freq="monthly"):
     portfolio_values = []
     dates = []
     trade_logs = []
-    n_stocks = len(dataset.symbols)
+    n_stocks = len(test_symbols)
     current_weights = np.ones(n_stocks) / n_stocks
 
     ts_data = {"return": [], "portfolio_value": [], "drawdown": [], "turnover": []}
 
     peak = initial_capital
 
-    test_windows = dataset.get_test_windows()
-    start_idx = dataset.test_start_idx
-
     for i, window in enumerate(test_windows):
-        global_idx = start_idx + i
         turnover = 0.0
 
         # 리밸런싱
         if i % interval == 0:
-            state = dataset.get_state(global_idx)
+            state = dataset.get_state(test_windows, i)
             action = agent.select_action(state, noise_std=0.0)
 
             if i > 0:
@@ -379,7 +372,7 @@ def run_ddpg_rebalancing(agent, dataset, rebalance_freq="monthly"):
                 "Strategy": strategy_name,
                 "Type": "Rebalance",
             }
-            for sym, w in zip(dataset.symbols, current_weights):
+            for sym, w in zip(test_symbols, current_weights):
                 log_entry[sym] = round(float(w), 4)
             trade_logs.append(log_entry)
 
@@ -420,42 +413,42 @@ def train_ddpg(agent, env, num_episodes=800, patience=100):
     (Hybrid TGNN-DDPG 방식 적용)
     """
     episode_rewards = []
-    best_reward = -float('inf')
+    best_reward = -float("inf")
     no_improve_count = 0
     best_model_state = None
-    
+
     # 동적 노이즈 파라미터 (Hybrid 방식)
     noise_start = 0.3
     noise_end = 0.05
     noise_decay = (noise_start - noise_end) / num_episodes
-    
+
     print(f"\n총 {num_episodes} 에피소드 학습 시작...")
-    print(f"각 에피소드 = {env.n_steps}개월 거래 (2015~2017)")
+    print(f"각 에피소드 = {env.n_steps}개월 거래")
     print(f"Early Stopping: Patience={patience}\n")
-    
+
     for episode in range(num_episodes):
         state = env.reset()
         episode_reward = 0
-        
+
         # 동적 노이즈 감소 (Hybrid 방식)
         noise_std = max(noise_end, noise_start - episode * noise_decay)
-        
+
         while True:
             action = agent.select_action(state, noise_std=noise_std)
             next_state, reward, done, info = env.step(action)
             agent.replay_buffer.push(state, action, reward, next_state, done)
-            
+
             if len(agent.replay_buffer) > 256:
                 agent.train(batch_size=64)
-            
+
             episode_reward += reward
             state = next_state
-            
+
             if done:
                 break
-        
+
         episode_rewards.append(episode_reward)
-        
+
         # 최고 성능 모델 저장
         if episode_reward > best_reward:
             best_reward = episode_reward
@@ -463,7 +456,7 @@ def train_ddpg(agent, env, num_episodes=800, patience=100):
             no_improve_count = 0
         else:
             no_improve_count += 1
-        
+
         # 로깅
         if (episode + 1) % 10 == 0:
             avg_reward = np.mean(episode_rewards[-10:])
@@ -475,18 +468,18 @@ def train_ddpg(agent, env, num_episodes=800, patience=100):
                 f"Noise: {noise_std:.3f} | "
                 f"No Improve: {no_improve_count}"
             )
-        
+
         # Early Stopping
         if no_improve_count >= patience:
             print(f"\n⚠️ Early Stopping at Episode {episode + 1}")
             print(f"   No improvement for {patience} episodes")
             break
-    
+
     # 최고 성능 모델 로드
     if best_model_state is not None:
         agent.actor.load_state_dict(best_model_state)
         print(f"\n✅ Best model loaded (Reward: {best_reward:+.2f})")
-    
+
     return episode_rewards, best_reward
 
 
@@ -497,36 +490,38 @@ def fine_tune_ddpg(agent, env, num_episodes=50):
     - 낮은 노이즈로 exploitation 강화
     """
     print(f"\n=== Fine-tuning 시작 ({num_episodes} episodes) ===")
-    
+
     episode_rewards = []
     noise_std = 0.1  # 낮은 탐색 노이즈
-    
+
     for episode in range(num_episodes):
         state = env.reset()
         episode_reward = 0
-        
+
         while True:
             action = agent.select_action(state, noise_std=noise_std)
             next_state, reward, done, info = env.step(action)
             agent.replay_buffer.push(state, action, reward, next_state, done)
-            
+
             # Fine-tuning 전용 작은 배치
             if len(agent.replay_buffer) > 128:
                 agent.train(batch_size=32)
-            
+
             episode_reward += reward
             state = next_state
-            
+
             if done:
                 break
-        
+
         episode_rewards.append(episode_reward)
-        
+
         if (episode + 1) % 10 == 0:
             avg_reward = np.mean(episode_rewards[-10:])
-            print(f"[Fine-tune {episode + 1:2d}/{num_episodes}] "
-                  f"Reward: {episode_reward:+8.2f} | Avg: {avg_reward:+8.2f}")
-    
+            print(
+                f"[Fine-tune {episode + 1:2d}/{num_episodes}] "
+                f"Reward: {episode_reward:+8.2f} | Avg: {avg_reward:+8.2f}"
+            )
+
     print("✅ Fine-tuning 완료\n")
     return episode_rewards
 
@@ -534,37 +529,54 @@ def fine_tune_ddpg(agent, env, num_episodes=50):
 def plot_training_curve(train_rewards, finetune_rewards, save_dir):
     """학습 진행 상황 시각화"""
     plt.figure(figsize=(12, 6))
-    
+
     # Main Training
-    plt.plot(range(1, len(train_rewards) + 1), train_rewards, 
-             label='Training', color='#2E86AB', alpha=0.6)
-    
+    plt.plot(
+        range(1, len(train_rewards) + 1),
+        train_rewards,
+        label="Training",
+        color="#2E86AB",
+        alpha=0.6,
+    )
+
     # Moving Average
     window = 20
     if len(train_rewards) >= window:
-        ma = np.convolve(train_rewards, np.ones(window)/window, mode='valid')
-        plt.plot(range(window, len(train_rewards) + 1), ma, 
-                label='MA(20)', color='#A23B72', linewidth=2)
-    
+        ma = np.convolve(train_rewards, np.ones(window) / window, mode="valid")
+        plt.plot(
+            range(window, len(train_rewards) + 1),
+            ma,
+            label="MA(20)",
+            color="#A23B72",
+            linewidth=2,
+        )
+
     # Fine-tuning
     if finetune_rewards:
         ft_start = len(train_rewards) + 1
         ft_x = range(ft_start, ft_start + len(finetune_rewards))
-        plt.plot(ft_x, finetune_rewards, 
-                 label='Fine-tuning', color='#F18F01', linewidth=2)
-        
-        plt.axvline(x=len(train_rewards), color='red', linestyle='--', 
-                    label='Fine-tuning Start', alpha=0.7)
-    
-    plt.xlabel('Episode', fontsize=12)
-    plt.ylabel('Episode Reward', fontsize=12)
-    plt.title('DDPG Training Progress (with Early Stopping)', 
-              fontsize=14, fontweight='bold')
-    plt.legend(loc='best')
+        plt.plot(
+            ft_x, finetune_rewards, label="Fine-tuning", color="#F18F01", linewidth=2
+        )
+
+        plt.axvline(
+            x=len(train_rewards),
+            color="red",
+            linestyle="--",
+            label="Fine-tuning Start",
+            alpha=0.7,
+        )
+
+    plt.xlabel("Episode", fontsize=12)
+    plt.ylabel("Episode Reward", fontsize=12)
+    plt.title(
+        "DDPG Training Progress (with Early Stopping)", fontsize=14, fontweight="bold"
+    )
+    plt.legend(loc="best")
     plt.grid(True, alpha=0.3)
-    
-    save_path = save_dir / 'training_curve.png'
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    save_path = save_dir / "training_curve.png"
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
     print(f"✅ 학습 곡선 저장: {save_path}")
     plt.close()
 
@@ -598,7 +610,7 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
         ax1.plot(dates, returns, label=name, linewidth=2.5, color=color)
 
     ax1.set_title(
-        "실전 투자 수익률 비교 (2018~2025)", fontsize=16, fontweight="bold", pad=20
+        "실전 투자 수익률 비교 (Test Period)", fontsize=16, fontweight="bold", pad=20
     )
     ax1.set_ylabel("누적 수익률 (%)", fontsize=12, fontweight="bold")
     ax1.grid(True, which="major", alpha=0.3, linestyle="--")
@@ -681,27 +693,44 @@ def plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_d
 
 
 def main(mode="compare"):
-    df = pd.read_csv(DATA_PATH)
+    print("=" * 60)
+    print("DDPG 데이터셋 준비 (train_data.csv / test_data.csv)")
+    print("=" * 60)
+    
+    # 데이터 로드
+    train_df = pd.read_csv(TRAIN_DATA_PATH)
+    test_df = pd.read_csv(TEST_DATA_PATH)
+    
+    # 특성 컬럼 정의
     feature_cols = [
-        "Beta",
-        "MarketCap",
+        "Close",
+        "Volume",
         "Momentum1M",
+        "Momentum3M",
         "Momentum6M",
+        "Momentum12M",
         "Volatility",
         "RSI",
+        "MACD",
+        "Signal",
+        "MACD_Hist",
         "Beta_Factor",
         "Value_Factor",
-        "Size_Factor",
         "Momentum_Factor",
         "Volatility_Factor",
+        "Mkt_RF",
+        "SMB",
+        "HML",
+        "RMW",
+        "CMA",
     ]
+    
+    # 데이터셋 생성
+    dataset = DDPGDataset(
+        train_df=train_df, test_df=test_df, window_size=12, feature_cols=feature_cols
+    )
 
-    print("=" * 60)
-    print("DDPG 데이터셋 준비 (3년 학습 / 8년 테스트)")
-    print("=" * 60)
-    dataset = DDPGDataset(df=df, window_size=12, feature_cols=feature_cols)
-
-    num_stocks = len(dataset.symbols)
+    num_stocks = len(dataset.train_symbols)
     num_features = len(feature_cols)
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -725,57 +754,70 @@ def main(mode="compare"):
             print("⚠️ 기존 모델 삭제")
             model_path.unlink()
 
-        print("\n=== 학습 모드 (2015~2017 데이터) ===")
+        print("\n=== 학습 모드 (Train Data) ===")
         train_windows = dataset.get_train_windows()
-        train_env = PortfolioEnv(dataset, windows=train_windows)
+        train_env = PortfolioEnv(
+            dataset, train_windows, dataset.train_symbols, feature_cols
+        )
 
         # 1. 메인 학습 (Early Stopping 적용)
         train_rewards, best_reward = train_ddpg(
-            agent, train_env, 
-            num_episodes=800,  # Hybrid와 동일
-            patience=100
+            agent, train_env, num_episodes=800, patience=100  # Hybrid와 동일
         )
-        
+
         # 2. Fine-tuning
         finetune_rewards = fine_tune_ddpg(agent, train_env, num_episodes=50)
-        
+
         # 3. 최종 모델 저장
         torch.save(agent.actor.state_dict(), model_path)
         print(f"✅ 모델 저장 완료: {model_path}")
-        
+
         # 4. 학습 곡선 시각화
         plot_training_curve(train_rewards, finetune_rewards, save_dir)
 
     elif mode == "compare":
         if model_path.exists():
             try:
-                agent.actor.load_state_dict(torch.load(model_path, map_location=DEVICE))
+                agent.actor.load_state_dict(
+                    torch.load(model_path, map_location=DEVICE)
+                )
                 print("✅ 기존 모델 로드 완료")
             except RuntimeError:
                 print("⚠️ 모델 구조 불일치. 재학습 시작...")
                 model_path.unlink()
                 train_windows = dataset.get_train_windows()
-                train_env = PortfolioEnv(dataset, windows=train_windows)
-                train_rewards, _ = train_ddpg(agent, train_env, num_episodes=800, patience=100)
+                train_env = PortfolioEnv(
+                    dataset, train_windows, dataset.train_symbols, feature_cols
+                )
+                train_rewards, _ = train_ddpg(
+                    agent, train_env, num_episodes=800, patience=100
+                )
                 finetune_rewards = fine_tune_ddpg(agent, train_env, num_episodes=50)
                 torch.save(agent.actor.state_dict(), model_path)
                 plot_training_curve(train_rewards, finetune_rewards, save_dir)
         else:
             print("⚠️ 학습된 모델 없음. 자동 학습 시작...")
             train_windows = dataset.get_train_windows()
-            train_env = PortfolioEnv(dataset, windows=train_windows)
-            train_rewards, _ = train_ddpg(agent, train_env, num_episodes=800, patience=100)
+            train_env = PortfolioEnv(
+                dataset, train_windows, dataset.train_symbols, feature_cols
+            )
+            train_rewards, _ = train_ddpg(
+                agent, train_env, num_episodes=800, patience=100
+            )
             finetune_rewards = fine_tune_ddpg(agent, train_env, num_episodes=50)
             torch.save(agent.actor.state_dict(), model_path)
             plot_training_curve(train_rewards, finetune_rewards, save_dir)
 
-        print("\n=== 실전 백테스팅 (2018~2025 데이터) ===")
+        print("\n=== 실전 백테스팅 (Test Data) ===")
 
-        buy_and_hold = run_buy_and_hold(dataset)
-        monthly = run_ddpg_rebalancing(agent, dataset, "monthly")
-        quarterly = run_ddpg_rebalancing(agent, dataset, "quarterly")
-        semiannual = run_ddpg_rebalancing(agent, dataset, "semiannual")
-        annual = run_ddpg_rebalancing(agent, dataset, "annual")
+        test_windows = dataset.get_test_windows()
+        test_symbols = dataset.test_symbols
+
+        buy_and_hold = run_buy_and_hold(test_windows, test_symbols)
+        monthly = run_ddpg_rebalancing(agent, dataset, test_windows, test_symbols, "monthly")
+        quarterly = run_ddpg_rebalancing(agent, dataset, test_windows, test_symbols, "quarterly")
+        semiannual = run_ddpg_rebalancing(agent, dataset, test_windows, test_symbols, "semiannual")
+        annual = run_ddpg_rebalancing(agent, dataset, test_windows, test_symbols, "annual")
 
         plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_dir)
 
@@ -789,7 +831,7 @@ def main(mode="compare"):
 
         logs_df = pd.DataFrame(all_logs)
         if not logs_df.empty:
-            cols = ["Date", "Strategy", "Type"] + sorted(dataset.symbols)
+            cols = ["Date", "Strategy", "Type"] + sorted(test_symbols)
             logs_df = logs_df[cols]
             log_path = save_dir / "trade_logs.csv"
             logs_df.to_csv(log_path, index=False)
