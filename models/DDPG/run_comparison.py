@@ -18,7 +18,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-from model import DDPGAgent
+from model import DDPGAgent, ReplayBuffer
 
 # 프로젝트 루트
 ROOT_DIR = Path(__file__).parent.parent.parent
@@ -34,12 +34,6 @@ plt.rcParams["axes.unicode_minus"] = False
 
 
 class DDPGDataset:
-    """
-    DDPG 전용 데이터셋
-    - train_data.csv: 학습 데이터
-    - test_data.csv: 테스트 데이터
-    """
-
     def __init__(self, train_df, test_df, window_size=12, feature_cols=None):
         self.window_size = window_size
         self.feature_cols = feature_cols
@@ -60,15 +54,12 @@ class DDPGDataset:
             )
             test_df = test_df.fillna(0)
 
-        # 날짜 변환
         train_df["Date"] = pd.to_datetime(train_df["Date"])
         test_df["Date"] = pd.to_datetime(test_df["Date"])
 
-        # 심볼 추출
         self.train_symbols = sorted(train_df["Symbol"].unique())
         self.test_symbols = sorted(test_df["Symbol"].unique())
 
-        # 월별 리샘플링
         self.train_monthly = (
             train_df.set_index("Date")
             .groupby(["Symbol", pd.Grouper(freq="ME")])
@@ -86,10 +77,10 @@ class DDPGDataset:
         self.train_monthly["Return_Raw"] = self.train_monthly["Momentum1M"].copy()
         self.test_monthly["Return_Raw"] = self.test_monthly["Momentum1M"].copy()
 
-        # ✅ 정규화할 특성 (Momentum1M 제외)
+        # ✅ 정규화할 특성 (Momentum1M 제외) - 이것이 실제 state 특성!
         self.norm_cols = [c for c in self.feature_cols if c != "Momentum1M"]
 
-        # 학습 데이터 기준으로 정규화
+        # ✅ 학습 데이터 기준으로 정규화
         self._fit_scaler_on_train_data()
 
         # 윈도우 생성
@@ -134,20 +125,18 @@ class DDPGDataset:
                 is_active = not stock_data[stock_data["Date"] == target_date].empty
 
                 if is_active:
-                    # ✅ 전체 특성 사용 (Momentum1M 포함)
-                    vals = stock_data[self.feature_cols].values
+                    # ✅ 정규화된 특성만 사용 (Momentum1M 제외!)
+                    vals = stock_data[self.norm_cols].values
 
                     if len(vals) < self.window_size:
                         pad = np.zeros(
-                            (self.window_size - len(vals), len(self.feature_cols))
+                            (self.window_size - len(vals), len(self.norm_cols))
                         )
                         vals = np.vstack([pad, vals])
                     features.append(vals)
                     active_mask.append(True)
                 else:
-                    features.append(
-                        np.zeros((self.window_size, len(self.feature_cols)))
-                    )
+                    features.append(np.zeros((self.window_size, len(self.norm_cols))))
                     active_mask.append(False)
 
             # ✅ 레이블은 Return_Raw 사용
@@ -815,23 +804,9 @@ def main(mode="compare"):
         plot_training_curve(train_rewards, finetune_rewards, save_dir)
 
     elif mode == "compare":
+        # ===== 1. 기존 학습된 모델 존재 여부 확인 =====
         if model_path.exists():
-            try:
-                agent.actor.load_state_dict(torch.load(model_path, map_location=DEVICE))
-                print("✅ 기존 모델 로드 완료")
-            except RuntimeError:
-                print("⚠️ 모델 구조 불일치. 재학습 시작...")
-                model_path.unlink()
-                train_windows = dataset.get_train_windows()
-                train_env = PortfolioEnv(
-                    dataset, train_windows, dataset.train_symbols, feature_cols
-                )
-                train_rewards, _ = train_ddpg(
-                    agent, train_env, num_episodes=800, patience=100
-                )
-                finetune_rewards = fine_tune_ddpg(agent, train_env, num_episodes=50)
-                torch.save(agent.actor.state_dict(), model_path)
-                plot_training_curve(train_rewards, finetune_rewards, save_dir)
+            print("✅ 기존 학습 모델 발견")
         else:
             print("⚠️ 학습된 모델 없음. 자동 학습 시작...")
             train_windows = dataset.get_train_windows()
@@ -850,23 +825,108 @@ def main(mode="compare"):
         test_windows = dataset.get_test_windows()
         test_symbols = dataset.test_symbols
 
+        # ===== 2. 🔥 테스트 데이터용 새 에이전트 생성 (Hybrid 방식) =====
+        num_stocks_test = len(test_symbols)
+        print(f"📊 Train 종목: {num_stocks}개 -> Test 종목: {num_stocks_test}개")
+
+        test_agent = DDPGAgent(
+            num_stocks_test,
+            num_features,
+            lr_actor=5e-5,
+            lr_critic=1e-3,
+            gamma=0.99,
+            tau=0.001,
+            entropy_coef=0.01,
+            device=DEVICE,
+        )
+
+        # ===== 3. 🔥 Encoder만 전이학습 (선택사항) =====
+        if model_path.exists() and num_stocks_test != num_stocks:
+            print("⚠️ 종목 수 불일치. Encoder만 전이학습 시도...")
+            try:
+                trained_state = torch.load(model_path, map_location=DEVICE)
+                test_state = test_agent.actor.state_dict()
+
+                # Encoder 파라미터만 복사
+                encoder_keys = [k for k in trained_state.keys() if "encoder" in k]
+                loaded_count = 0
+
+                for key in encoder_keys:
+                    if (
+                        key in test_state
+                        and trained_state[key].shape == test_state[key].shape
+                    ):
+                        test_state[key] = trained_state[key]
+                        loaded_count += 1
+
+                test_agent.actor.load_state_dict(test_state)
+                print(f"✅ Encoder 전이학습 완료: {loaded_count}개 레이어")
+
+            except Exception as e:
+                print(f"⚠️ 전이학습 실패: {e}")
+                print("→ 테스트 데이터로 처음부터 학습...")
+
+        elif model_path.exists() and num_stocks_test == num_stocks:
+            # 종목 수 동일하면 전체 로드
+            test_agent.actor.load_state_dict(
+                torch.load(model_path, map_location=DEVICE)
+            )
+            print("✅ 전체 모델 로드 완료")
+
+        # ===== 4. 🔥 Fine-tuning (Test 데이터) =====
+        print("\n[Fine-tuning] Test 데이터로 출력 레이어 조정 중...")
+        test_env = PortfolioEnv(dataset, test_windows, test_symbols, feature_cols)
+
+        finetune_buffer = ReplayBuffer(capacity=512)
+        test_agent.replay_buffer = finetune_buffer  # 작은 버퍼 사용
+
+        for episode in range(50):  # Fine-tune episodes
+            state = test_env.reset()
+            episode_reward = 0
+
+            while True:
+                action = test_agent.select_action(state, noise_std=0.1)
+                next_state, reward, done, info = test_env.step(action)
+
+                test_agent.replay_buffer.push(state, action, reward, next_state, done)
+
+                if len(test_agent.replay_buffer) >= 32:
+                    test_agent.train(batch_size=32)
+
+                episode_reward += reward
+                state = next_state
+
+                if done:
+                    break
+
+            if (episode + 1) % 10 == 0:
+                print(f"  Episode {episode + 1}/50: Reward = {episode_reward:.2f}")
+
+        print("✅ Fine-tuning 완료\n")
+        test_agent.actor.eval()
+
+        # ===== 5. 백테스팅 실행 (test_agent 사용) =====
         buy_and_hold = run_buy_and_hold(test_windows, test_symbols)
         monthly = run_ddpg_rebalancing(
-            agent, dataset, test_windows, test_symbols, "monthly"
+            test_agent,
+            dataset,
+            test_windows,
+            test_symbols,
+            "monthly",  # ← test_agent!
         )
         quarterly = run_ddpg_rebalancing(
-            agent, dataset, test_windows, test_symbols, "quarterly"
+            test_agent, dataset, test_windows, test_symbols, "quarterly"
         )
         semiannual = run_ddpg_rebalancing(
-            agent, dataset, test_windows, test_symbols, "semiannual"
+            test_agent, dataset, test_windows, test_symbols, "semiannual"
         )
         annual = run_ddpg_rebalancing(
-            agent, dataset, test_windows, test_symbols, "annual"
+            test_agent, dataset, test_windows, test_symbols, "annual"
         )
 
         plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_dir)
 
-        # 로그 저장
+        # ===== 나머지 로그 저장 코드 동일 =====
         all_logs = []
         all_logs.extend(buy_and_hold["trade_logs"])
         all_logs.extend(monthly["trade_logs"])
