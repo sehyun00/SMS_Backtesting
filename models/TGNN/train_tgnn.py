@@ -242,13 +242,12 @@ class TGNNModel(BaseTGNNModel):
         """Tanh 제거: 예측 범위 제한 없음"""
         return nn.Sequential(
             nn.Linear(hidden_dim, 64),
-            nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.LayerNorm(64),
+            nn.Dropout(0.5),
             nn.Linear(64, 32),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(0.4),
             nn.Linear(32, 1)
-            # Tanh 제거
         )
 
     def forward(self, features, adj_matrix, target_type="Momentum1M"):
@@ -319,9 +318,9 @@ def train_multitask_model(
     model = model.to(device)
     
     # Optimizer & Scheduler
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5, weight_decay=5e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=20, T_mult=2, eta_min=1e-6
+        optimizer, T_0=15, T_mult=2, eta_min=1e-6
     )
 
     # Early Stopping
@@ -359,8 +358,8 @@ def train_multitask_model(
                     predictions,
                     batch[target],
                     batch.get("active_mask"),
-                    alpha=0.6,  # MSE 가중치
-                    beta=0.4    # Ranking 가중치
+                    alpha=0.3,  # MSE 가중치
+                    beta=0.7    # Ranking 가중치
                 )
                 total_loss += loss
 
@@ -433,7 +432,7 @@ def train_multitask_model(
                 break
 
         # ========== 로그 출력 ==========
-        if epoch % 1 == 0 or epoch == num_epochs - 1:
+        if epoch % 10 == 0 or epoch == num_epochs - 1:
             print(
                 f"Epoch {epoch:3d} | "
                 f"Train: {avg_train_loss:.6f} | "
@@ -496,11 +495,16 @@ def main():
             train_std[col] = s
             train_df[col] = (train_df[col] - m) / (s + 1e-8)
 
-    # Momentum 극단값 클리핑 후 표준화
+    # # Momentum 극단값 클리핑 후 표준화
+    # for mom_col in momentum_cols:
+    #     if mom_col in train_df.columns:
+    #         raw_values = train_df[mom_col].clip(-0.4, 0.5)
+    #         train_df[mom_col] = (raw_values - raw_values.mean()) / (raw_values.std() + 1e-8)
+
     for mom_col in momentum_cols:
         if mom_col in train_df.columns:
-            raw_values = train_df[mom_col].clip(-0.4, 0.5)
-            train_df[mom_col] = (raw_values - raw_values.mean()) / (raw_values.std() + 1e-8)
+            train_df[mom_col] = train_df[mom_col] / 100.0 
+            train_df[mom_col] = train_df[mom_col].clip(-0.5, 0.5)
 
     symbols = sorted(train_df["Symbol"].unique())
     print(f"✅ 종목 수: {len(symbols)}")

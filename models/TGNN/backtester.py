@@ -144,17 +144,24 @@ class Backtester:
                     
                     # Top-K 선택
                     n_active = np.sum(active_mask)
-                    k = min(self.config.top_k, n_active)
+                    k = min(self.config.top_k, max(3, int(n_active * 0.2)))
                     
                     new_weights = np.zeros(n_stocks)
                     if k > 0:
-                        top_k_idx = np.argsort(pred_returns)[-k:]
+                        sorted_idx = np.argsort(pred_returns)
+                        top_k_idx = sorted_idx[-k:]
+
+                        positive_mask = pred_returns[top_k_idx] > 0
+                        final_idx = top_k_idx[positive_mask]
                         
-                        if self.config.weighting_method == "softmax":
-                            top_scores = pred_returns[top_k_idx]
-                            new_weights[top_k_idx] = self.softmax(top_scores)
-                        else:  # equal
-                            new_weights[top_k_idx] = 1.0 / k
+                        if len(final_idx) > 0:
+                            if self.config.weighting_method == "softmax":
+                                # Temperature scaling으로 집중도 조절
+                                temp = 2.0
+                                top_scores = pred_returns[final_idx] / temp
+                                new_weights[final_idx] = self.softmax(top_scores)
+                            else:
+                                new_weights[final_idx] = 1.0 / len(final_idx)
                     
                     prev_weights = current_weights.copy()
                     current_weights = new_weights
@@ -166,7 +173,7 @@ class Backtester:
                 transaction_cost = turnover * capital * (self.config.cost_bps / 10000)
                 
                 # 🔥 실제 수익률 클리핑 (극단값 방지)
-                actual_returns = np.clip(actual_returns, -50.0, 50.0)
+                actual_returns = np.clip(actual_returns,  -50.0, 50.0)
                 
                 # 포트폴리오 수익률
                 portfolio_return = np.dot(current_weights, actual_returns)

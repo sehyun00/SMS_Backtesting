@@ -342,12 +342,24 @@ def main():
         if col in test_df.columns and col in train_mean:
             test_df[col] = (test_df[col] - train_mean[col]) / (train_std[col] + 1e-8)
 
+    test_df_scaled = test_df.copy()
     for mom_col in momentum_cols:
-        if mom_col in test_df.columns:
-            test_df[mom_col] = test_df[mom_col].clip(-100, 100)
+        if mom_col in test_df_scaled.columns:
+            test_df_scaled[mom_col] = test_df_scaled[mom_col] / 100.0
+            test_df_scaled[mom_col] = test_df_scaled[mom_col].clip(-0.5, 0.5)
 
     symbols = sorted(test_df["Symbol"].unique())
     print(f"종목 수(테스트): {len(symbols)}")
+
+    # ✅ Buy & Hold용: /100 적용 안 함
+    bnh_dataset = TGNN_Dataset(
+        test_df_original,  # /100 전 원본 데이터
+        window_size=12,
+        feature_cols=all_feature_cols,
+        symbols=symbols,
+        start_date="2021-01-01",
+        end_date="2024-12-31",
+    )
 
     test_dataset = TGNN_Dataset(
         test_df,
