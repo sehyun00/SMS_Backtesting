@@ -2,6 +2,7 @@
 DDPG 학습 & 리밸런싱 빈도별 백테스팅 비교
 - train_data.csv / test_data.csv 사용 (Hybrid 모델과 동일)
 - Hybrid TGNN-DDPG 방식 적용: Early Stopping + Fine-tuning
+- Phase 1 개선: 위험 조정 보상 함수
 """
 
 import numpy as np
@@ -15,6 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import warnings
+from collections import deque
 
 warnings.filterwarnings("ignore")
 
@@ -168,10 +170,17 @@ class DDPGDataset:
         return self.test_windows
 
 
-# ============ 포트폴리오 환경 ============
+# ============ 개선된 포트폴리오 환경 (Phase 1) ============
 
 
 class PortfolioEnv:
+    """
+    Phase 1 개선사항:
+    - 위험 조정 보상 함수
+    - 변동성 추적 및 페널티
+    - 포트폴리오 집중도 규제
+    """
+
     def __init__(self, dataset, windows, symbols, features, initial_cash=1_000_000):
         self.dataset = dataset
         self.windows = windows
@@ -192,16 +201,41 @@ class PortfolioEnv:
         self.gamma = 2.0  # Risk Aversion Coefficient (2.0: Moderate)
         self.cost_bps = 0.0005  # 5bps (0.05%) Transaction Cost
 
+        # 🔥 Phase 1: 변동성 추적
+        self.return_history = deque(maxlen=12)  # 최근 12개월 수익률
+        self.volatility_window = 6  # 변동성 계산 윈도우
+
     def reset(self):
         self.current_step = 0
         self.portfolio_value = self.initial_cash
         self.prev_weights = np.zeros(self.n_stocks)
+        self.return_history.clear()
         return self._get_state(0)
 
     def _get_state(self, idx):
         w = self.windows[idx]
         state = w["features"][:, -1, :].flatten()
         return state.astype(np.float32)
+
+    def _calculate_portfolio_volatility(self):
+        """최근 수익률의 변동성 계산"""
+        if len(self.return_history) < 2:
+            return 0.0
+
+        returns = np.array(list(self.return_history))
+        return np.std(returns)
+
+    def _calculate_concentration_penalty(self, weights):
+        """
+        포트폴리오 집중도 페널티
+        - Herfindahl Index 기반
+        - 과도한 집중 방지
+        """
+        hhi = np.sum(weights**2)
+        # HHI가 높을수록 집중됨 (1/n = 균등 분산)
+        ideal_hhi = 1.0 / self.n_stocks
+        concentration = max(0, hhi - ideal_hhi * 1.5)  # 1.5배까지 허용
+        return concentration * 10  # 스케일 조정
 
     def step(self, action):
         window = self.windows[self.current_step]
@@ -210,6 +244,9 @@ class PortfolioEnv:
         # 1. 포트폴리오 수익률
         portfolio_return_pct = np.dot(action, returns)
         portfolio_return = portfolio_return_pct / 100.0
+
+        # 수익률 히스토리 업데이트
+        self.return_history.append(portfolio_return_pct)
 
         # 2. 거래비용
         turnover = np.sum(np.abs(action - self.prev_weights))
@@ -224,18 +261,25 @@ class PortfolioEnv:
         self.current_step += 1
         done = self.current_step >= self.n_steps
 
-        # ✅ 새로운 보상 함수: 단순하고 직관적
+        # ============ 🔥 Phase 1: 개선된 보상 함수 ============
         # 기본 보상: 월간 수익률 (%)
         base_reward = portfolio_return_pct
 
         # 거래 비용 페널티 (bps -> % 변환)
         cost_penalty = turnover * self.cost_bps * 10000  # 5bps = 0.5%
 
-        # 최종 보상
-        reward = base_reward - cost_penalty
+        # 🆕 변동성 페널티 (위험 조정)
+        volatility = self._calculate_portfolio_volatility()
+        risk_penalty = self.gamma * (volatility**2)  # 제곱으로 큰 변동성 강하게 규제
 
-        # 극단값 방지
-        reward = np.clip(reward, -50, 50)
+        # 🆕 집중도 페널티
+        concentration_penalty = self._calculate_concentration_penalty(action)
+
+        # 최종 보상 = 수익 - 비용 - 위험 - 집중도
+        reward = base_reward - cost_penalty - risk_penalty - concentration_penalty
+
+        # 극단값 방지 (더 넓은 범위로 조정)
+        reward = np.clip(reward, -100, 100)
 
         self.prev_weights = action
 
@@ -250,7 +294,10 @@ class PortfolioEnv:
             "date": window["date"],
             "turnover": turnover,
             "cost": transaction_cost,
-            "raw_return": portfolio_return_pct,  # 디버깅용
+            "raw_return": portfolio_return_pct,
+            "volatility": volatility,  # 🆕 디버깅용
+            "risk_penalty": risk_penalty,  # 🆕
+            "concentration": concentration_penalty,  # 🆕
         }
 
         return next_state, reward, done, info
@@ -309,7 +356,7 @@ def run_buy_and_hold(test_windows, test_symbols):
     n_stocks = len(test_symbols)
     weights = np.ones(n_stocks) / n_stocks
 
-    portfolio_values = []  # ✅ 빈 리스트로 시작
+    portfolio_values = []
     dates = []
     trade_logs = []
 
@@ -327,20 +374,15 @@ def run_buy_and_hold(test_windows, test_symbols):
             log_entry[sym] = w
         trade_logs.append(log_entry)
 
-    current_value = initial_capital  # ✅ 현재 포트폴리오 가치
-    peak = initial_capital  # ✅ 누적 최고점 초기화
+    current_value = initial_capital
+    peak = initial_capital
 
     for i, window in enumerate(test_windows):
         actual_returns = window["labels"]
         portfolio_return = np.dot(weights, actual_returns)
 
-        # ✅ 포트폴리오 가치 업데이트
         current_value *= 1 + portfolio_return / 100
-
-        # ✅ 누적 최고점 업데이트
         peak = max(peak, current_value)
-
-        # ✅ Drawdown 계산 (peak 대비 하락률)
         dd = (current_value - peak) / peak
 
         portfolio_values.append(current_value)
@@ -349,14 +391,14 @@ def run_buy_and_hold(test_windows, test_symbols):
         ts_data["return"].append(portfolio_return)
         ts_data["portfolio_value"].append(current_value)
         ts_data["drawdown"].append(dd)
-        ts_data["turnover"].append(0.0)  # Buy & Hold는 거래비용 없음
+        ts_data["turnover"].append(0.0)
 
     metrics = calculate_metrics(ts_data, dates, "1/N Buy & Hold")
 
     return {
         "dates": dates,
-        "portfolio_values": portfolio_values,  # ✅ 슬라이싱 제거
-        "final_capital": current_value,  # ✅ 마지막 값 직접 사용
+        "portfolio_values": portfolio_values,
+        "final_capital": current_value,
         "cumulative_return": (current_value / initial_capital - 1) * 100,
         "trade_logs": trade_logs,
         "ts_data": ts_data,
@@ -457,11 +499,10 @@ def train_ddpg(agent, env, num_episodes=800, patience=100, episode_length=24):
     print(f"Early Stopping: Patience={patience}\n")
 
     for episode in range(num_episodes):
-        state = env.reset()  # ✅ 랜덤 시작점
+        state = env.reset()
         episode_reward = 0
         noise_std = max(noise_end, noise_start - episode * noise_decay)
 
-        # ✅ episode_length만큼만 진행
         steps_taken = 0
         while steps_taken < episode_length and env.current_step < env.n_steps:
             action = agent.select_action(state, noise_std=noise_std)
@@ -523,7 +564,7 @@ def fine_tune_ddpg(agent, env, num_episodes=50):
     print(f"\n=== Fine-tuning 시작 ({num_episodes} episodes) ===")
 
     episode_rewards = []
-    noise_std = 0.1  # 낮은 탐색 노이즈
+    noise_std = 0.1
 
     for episode in range(num_episodes):
         state = env.reset()
@@ -534,7 +575,6 @@ def fine_tune_ddpg(agent, env, num_episodes=50):
             next_state, reward, done, info = env.step(action)
             agent.replay_buffer.push(state, action, reward, next_state, done)
 
-            # Fine-tuning 전용 작은 배치
             if len(agent.replay_buffer) > 128:
                 agent.train(batch_size=32)
 
@@ -769,7 +809,7 @@ def main(mode="compare"):
     agent = DDPGAgent(
         num_stocks,
         num_features,
-        lr_actor=5e-5,  # Hybrid와 동일
+        lr_actor=5e-5,
         lr_critic=1e-3,
         gamma=0.99,
         tau=0.001,
@@ -796,7 +836,7 @@ def main(mode="compare"):
             agent,
             train_env,
             num_episodes=800,
-            patience=100,  # Hybrid와 동일
+            patience=100,
         )
 
         # 2. Fine-tuning
@@ -831,7 +871,7 @@ def main(mode="compare"):
         test_windows = dataset.get_test_windows()
         test_symbols = dataset.test_symbols
 
-        # ===== 2. 🔥 테스트 데이터용 새 에이전트 생성 (Hybrid 방식) =====
+        # ===== 2. 테스트 데이터용 새 에이전트 생성 (Hybrid 방식) =====
         num_stocks_test = len(test_symbols)
         print(f"📊 Train 종목: {num_stocks}개 -> Test 종목: {num_stocks_test}개")
 
@@ -846,7 +886,7 @@ def main(mode="compare"):
             device=DEVICE,
         )
 
-        # ===== 3. 🔥 Encoder만 전이학습 (선택사항) =====
+        # ===== 3. Encoder만 전이학습 (선택사항) =====
         if model_path.exists() and num_stocks_test != num_stocks:
             print("⚠️ 종목 수 불일치. Encoder만 전이학습 시도...")
             try:
@@ -879,14 +919,14 @@ def main(mode="compare"):
             )
             print("✅ 전체 모델 로드 완료")
 
-        # ===== 4. 🔥 Fine-tuning (Test 데이터) =====
+        # ===== 4. Fine-tuning (Test 데이터) =====
         print("\n[Fine-tuning] Test 데이터로 출력 레이어 조정 중...")
         test_env = PortfolioEnv(dataset, test_windows, test_symbols, feature_cols)
 
         finetune_buffer = ReplayBuffer(capacity=512)
-        test_agent.replay_buffer = finetune_buffer  # 작은 버퍼 사용
+        test_agent.replay_buffer = finetune_buffer
 
-        for episode in range(50):  # Fine-tune episodes
+        for episode in range(50):
             state = test_env.reset()
             episode_reward = 0
 
@@ -918,7 +958,7 @@ def main(mode="compare"):
             dataset,
             test_windows,
             test_symbols,
-            "monthly",  # ← test_agent!
+            "monthly",
         )
         quarterly = run_ddpg_rebalancing(
             test_agent, dataset, test_windows, test_symbols, "quarterly"
@@ -932,7 +972,7 @@ def main(mode="compare"):
 
         plot_comparison(buy_and_hold, monthly, quarterly, semiannual, annual, save_dir)
 
-        # ===== 나머지 로그 저장 코드 동일 =====
+        # ===== 로그 저장 =====
         all_logs = []
         all_logs.extend(buy_and_hold["trade_logs"])
         all_logs.extend(monthly["trade_logs"])
