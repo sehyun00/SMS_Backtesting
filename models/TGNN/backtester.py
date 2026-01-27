@@ -66,6 +66,19 @@ class Backtester:
         e_x = np.exp(x - np.max(x))
         return e_x / e_x.sum()
     
+    def allocate_weights_softmax(self, predictions, active_mask):
+        """예측값 기반 Softmax 가중치"""
+        valid_pred = predictions[active_mask]
+        if len(valid_pred) == 0:
+            return np.array([])
+        
+        # Temperature scaling
+        temp = 2.0
+        exp_pred = np.exp(valid_pred / temp)
+        weights = exp_pred / exp_pred.sum()
+        
+        return weights
+
     def run(self, rebalance_freq: str = "monthly", benchmark_weights: np.ndarray = None) -> Dict:
         """
         백테스팅 실행
@@ -101,7 +114,7 @@ class Backtester:
                 date = self.dataset.windows[idx]["date"]
                 active_mask = batch["active_mask"].numpy()
                 
-                # 🔥 실제 수익률은 target_type에 해당하는 라벨 사용
+                # 🔥 실제 수익률은 target_type에 해당하는 라벨 사용 (소수 단위)
                 if self.target_type in batch:
                     actual_returns = batch[self.target_type].numpy()
                 else:
@@ -123,25 +136,32 @@ class Backtester:
                     pred_returns = predictions.squeeze(0).numpy()
                     
                     # 🔥 NaN/Inf 체크 및 클리핑
-                    pred_returns = np.nan_to_num(pred_returns, nan=-np.inf, posinf=10.0, neginf=-10.0)
-                    pred_returns = np.clip(pred_returns, -10.0, 10.0)
+                    pred_returns = np.nan_to_num(pred_returns, nan=-np.inf, posinf=1.0, neginf=-1.0)
+                    pred_returns = np.clip(pred_returns, -1.0, 1.0)
                     
                     # 상장 전 종목 제외
                     pred_returns[~active_mask] = -np.inf
                     
                     # Top-K 선택
                     n_active = np.sum(active_mask)
-                    k = min(self.config.top_k, n_active)
+                    k = min(self.config.top_k, max(3, int(n_active * 0.2)))
                     
                     new_weights = np.zeros(n_stocks)
                     if k > 0:
-                        top_k_idx = np.argsort(pred_returns)[-k:]
+                        sorted_idx = np.argsort(pred_returns)
+                        top_k_idx = sorted_idx[-k:]
+
+                        positive_mask = pred_returns[top_k_idx] > 0
+                        final_idx = top_k_idx[positive_mask]
                         
-                        if self.config.weighting_method == "softmax":
-                            top_scores = pred_returns[top_k_idx]
-                            new_weights[top_k_idx] = self.softmax(top_scores)
-                        else:  # equal
-                            new_weights[top_k_idx] = 1.0 / k
+                        if len(final_idx) > 0:
+                            if self.config.weighting_method == "softmax":
+                                # Temperature scaling으로 집중도 조절
+                                temp = 2.0
+                                top_scores = pred_returns[final_idx] / temp
+                                new_weights[final_idx] = self.softmax(top_scores)
+                            else:
+                                new_weights[final_idx] = 1.0 / len(final_idx)
                     
                     prev_weights = current_weights.copy()
                     current_weights = new_weights
@@ -152,13 +172,18 @@ class Backtester:
                 # 거래비용
                 transaction_cost = turnover * capital * (self.config.cost_bps / 10000)
                 
+<<<<<<< HEAD
                 # 🔥 실제 수익률 클리핑 (극단값 방지)
-                actual_returns = np.clip(actual_returns, -50.0, 50.0)
+                actual_returns = np.clip(actual_returns,  -50.0, 50.0)
+=======
+                # 🔥 실제 수익률 클리핑 (극단값 방지) - 소수 단위
+                actual_returns = np.clip(actual_returns, -0.5, 0.5)
+>>>>>>> f80a95ab12d5fc2f84b2b00f81c9780812c6bbc0
                 
-                # 포트폴리오 수익률
+                # 포트폴리오 수익률 (소수)
                 portfolio_return = np.dot(current_weights, actual_returns)
                 
-                # 벤치마크 수익률
+                # 벤치마크 수익률 (소수)
                 benchmark_return = np.dot(benchmark_weights, actual_returns)
                 
                 # 🔥 수익률 검증
@@ -166,8 +191,8 @@ class Backtester:
                     print(f"⚠️ Warning: Invalid portfolio_return at {date}: {portfolio_return}")
                     portfolio_return = 0.0
                 
-                # 자산 업데이트
-                capital = capital * (1 + portfolio_return / 100) - transaction_cost
+                # ✅ 자산 업데이트 (소수 단위 그대로 사용)
+                capital = capital * (1 + portfolio_return) - transaction_cost
                 
                 # 드로다운
                 peak = max(peak, capital)
@@ -176,20 +201,20 @@ class Backtester:
                 # 누적 수익률
                 cumulative_return = (capital / self.config.initial_capital - 1) * 100
                 
-                # 초과 수익률
+                # 초과 수익률 (소수)
                 excess_return = portfolio_return - benchmark_return
                 
-                # 기록 저장
+                # ✅ 기록 저장 (소수 → % 변환)
                 self.history.append({
                     "date": date,
                     "portfolio_value": capital,
-                    "period_return": portfolio_return,
+                    "period_return": portfolio_return * 100,  # 소수 → %
                     "cumulative_return": cumulative_return,
                     "drawdown": drawdown,
                     "turnover": turnover,
                     "transaction_cost": transaction_cost,
-                    "benchmark_return": benchmark_return,
-                    "excess_return": excess_return,
+                    "benchmark_return": benchmark_return * 100,  # 소수 → %
+                    "excess_return": excess_return * 100,  # 소수 → %
                     "weights": current_weights.copy(),
                     "active_stocks": int(np.sum(active_mask)),
                 })
@@ -207,71 +232,81 @@ class Backtester:
         }
     
     def run_buy_and_hold(self) -> Dict:
-        """Buy & Hold (동일가중) 백테스팅"""
+        """
+        ✅ Buy & Hold (고정값 - 절대 수정 금지!)
+        
+        원본 데이터의 Momentum1M을 % 단위 그대로 사용
+        """
         capital = self.config.initial_capital
         peak = capital
         n_stocks = len(self.dataset.symbols)
-        weights = np.ones(n_stocks) / n_stocks
-        
+
         self.history = []
-        
+
+        # 1) 첫 시점 기준 동일가중 비중 확정
+        first_batch = self.dataset[0]
+        first_mask = first_batch["active_mask"].numpy().astype(bool)
+        n_active_first = int(first_mask.sum())
+
+        if n_active_first > 0:
+            base_weights = np.zeros(n_stocks)
+            base_weights[first_mask] = 1.0 / n_active_first
+        else:
+            base_weights = np.ones(n_stocks) / n_stocks
+
         for idx in range(len(self.dataset)):
             batch = self.dataset[idx]
             date = self.dataset.windows[idx]["date"]
-            active_mask = batch["active_mask"].numpy()
-            
-            # 🔥 Momentum1M 사용 (월별 수익률)
-            if "Momentum1M" in batch:
-                actual_returns = batch["Momentum1M"].numpy()
-            else:
-                actual_returns = batch.get("labels", torch.zeros(n_stocks)).numpy()
-            
-            # 🔥 극단값 클리핑
-            actual_returns = np.clip(actual_returns, -50.0, 50.0)
-            
-            # 활성 종목만 동일가중
-            n_active = np.sum(active_mask)
-            if n_active > 0:
-                active_weights = np.zeros(n_stocks)
-                active_weights[active_mask] = 1.0 / n_active
-            else:
-                active_weights = weights
-            
-            portfolio_return = np.dot(active_weights, actual_returns)
-            
-            # 🔥 검증
-            if np.isnan(portfolio_return) or np.isinf(portfolio_return):
-                portfolio_return = 0.0
-            
-            capital = capital * (1 + portfolio_return / 100)
-            
+            active_mask = batch["active_mask"].numpy().astype(bool)
+
+            # ✅ 원본 데이터 그대로 사용 (% 단위)
+            # dataset이 이미 /100 처리했으므로 소수 단위임
+            r = batch["Momentum1M"].numpy()  # shape: (n_stocks,) - 소수 단위
+
+            # 2) 상장 전 종목 비중 0
+            w = base_weights.copy()
+            w[~active_mask] = 0.0
+            if w.sum() > 0:
+                w /= w.sum()
+
+            # 3) 포트 수익률 (소수 기준)
+            port_r = float((w * r).sum())  # 예: 0.02 = 2%
+
+            # 4) 자산 업데이트
+            capital *= (1.0 + port_r)
+
+            # 5) 드로다운 / 누적 수익률 (초기자본 기준)
             peak = max(peak, capital)
-            drawdown = (capital - peak) / peak * 100
-            cumulative_return = (capital / self.config.initial_capital - 1) * 100
-            
-            self.history.append({
-                "date": date,
-                "portfolio_value": capital,
-                "period_return": portfolio_return,
-                "cumulative_return": cumulative_return,
-                "drawdown": drawdown,
-                "turnover": 0.0,
-                "transaction_cost": 0.0,
-                "benchmark_return": portfolio_return,
-                "excess_return": 0.0,
-                "weights": active_weights.copy(),
-                "active_stocks": int(n_active),
-            })
-        
+            drawdown = (capital / peak - 1.0) * 100.0
+            cum_ret = (capital / self.config.initial_capital - 1.0) * 100.0
+
+            # 6) 기록 저장 (소수 → %로 변환하여 저장)
+            self.history.append(
+                {
+                    "date": date,
+                    "portfolio_value": capital,
+                    "period_return": port_r * 100.0,  # 소수 → %
+                    "cumulative_return": cum_ret,
+                    "drawdown": drawdown,
+                    "turnover": 0.0,
+                    "transaction_cost": 0.0,
+                    "benchmark_return": port_r * 100.0,
+                    "excess_return": 0.0,
+                    "weights": w.copy(),
+                    "active_stocks": int(active_mask.sum()),
+                }
+            )
+
+        # 집계 지표 계산
         self.metrics = self._calculate_metrics()
-        
+
         return {
             "history": self.history,
             "metrics": self.metrics,
             "final_capital": capital,
-            "cumulative_return": cumulative_return,
+            "cumulative_return": cum_ret,
         }
-    
+
     def _calculate_metrics(self) -> Dict:
         """집계 지표 계산"""
         if not self.history:
@@ -296,6 +331,17 @@ class Backtester:
         # Downside Deviation
         downside_returns = returns[returns < 0]
         downside_deviation = downside_returns.std() * np.sqrt(periods_per_year) if len(downside_returns) > 0 else 0
+
+        # Avg Annual Drawdown
+        if "date" in df.columns and "drawdown" in df.columns and len(df) > 0:
+            dates = pd.to_datetime(df["date"])
+            df_dd = df.copy()
+            df_dd["year"] = dates.dt.year
+            # 연도별 평균 드로다운(%)
+            annual_dd = df_dd.groupby("year")["drawdown"].mean()
+            avg_annual_dd = annual_dd.mean() / 100.0
+        else:
+            avg_annual_dd = 0.0
         
         # VaR & CVaR (95%)
         var_95 = np.percentile(returns, 5) if len(returns) > 0 else 0
@@ -413,7 +459,7 @@ def create_metrics_summary_table(all_metrics: Dict) -> pd.DataFrame:
             "Cumulative Return": f"{metrics.get('total_return', 0):.2f}%",
             "CAGR": f"{metrics.get('cagr', 0):.2f}%",
             "MDD": f"{metrics.get('max_drawdown', 0):.2f}%",
-            "Avg Annual DD": f"{metrics.get('downside_deviation', 0):.2f}%",
+            "Avg Annual DD": f"{metrics.get('avg_annual_drawdown', 0):.2f}%",
             "Sharpe": f"{metrics.get('sharpe_ratio', 0):.2f}",
         }
         rows.append(row)

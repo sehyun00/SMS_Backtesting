@@ -42,7 +42,6 @@ class GraphConvLayer(nn.Module):
 
         return F.relu(output)
 
-#DD
 class TemporalAttention(nn.Module):
     """
     시간적 어텐션 레이어 (Temporal Attention Layer)
@@ -98,6 +97,7 @@ class TGNNModel(nn.Module):
     ):
         super().__init__()
         self.input_proj = nn.Linear(num_features, hidden_dims[0])
+        self.input_ln = nn.LayerNorm(hidden_dims[0])
 
         self.gcn_layers = nn.ModuleList(
             [
@@ -105,18 +105,22 @@ class TGNNModel(nn.Module):
                 for i in range(len(hidden_dims) - 1)
             ]
         )
+        
+        self.gcn_lns = nn.ModuleList(
+            [nn.LayerNorm(hidden_dims[i+1]) for i in range(len(hidden_dims) - 1)]
+        )
 
         self.temporal_attn = TemporalAttention(hidden_dims[-1], num_heads)
 
         self.predictor = nn.Sequential(
-            nn.Linear(hidden_dims[-1], 32),
+            nn.Linear(hidden_dims[-1], 64),
             nn.ReLU(),
-            nn.Dropout(0.2),  # Dropout 증가
-            nn.Linear(32, 1),
-            nn.Tanh()  # -1 ~ 1 범위로 제한
+            nn.Dropout(0.3),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(32, 1)
         )
-
-        self.output_scale = nn.Parameter(torch.tensor(20.0))  # 초기값: ±20% 범위
 
     def forward(self, features: torch.Tensor, adj_matrix: torch.Tensor):
         batch, N, T, F = features.shape
@@ -125,9 +129,16 @@ class TGNNModel(nn.Module):
         for t in range(T):
             x_t = features[:, :, t, :]
             h = self.input_proj(x_t)
+            h = self.input_ln(h)
 
-            for gcn in self.gcn_layers:
-                h = gcn(h, adj_matrix)
+            for i, (gcn, ln) in enumerate(zip(self.gcn_layers, self.gcn_lns)):
+                h_new = gcn(h, adj_matrix)
+                h_new = ln(h_new)
+                
+                if h.shape[-1] == h_new.shape[-1]:
+                    h = h_new + h
+                else:
+                    h = h_new
 
             gcn_outputs.append(h)
 
@@ -135,9 +146,80 @@ class TGNNModel(nn.Module):
         node_embeddings = self.temporal_attn(temporal_features)
 
         predictions = self.predictor(node_embeddings).squeeze(-1)
-        predictions = predictions * self.output_scale
 
         return predictions, node_embeddings
+
+# ============ 손실 함수 ============
+
+def pairwise_ranking_loss(predictions: torch.Tensor, labels: torch.Tensor, 
+                          active_mask: torch.Tensor = None, margin: float = 0.1) -> torch.Tensor:
+    """
+    
+    목적: 절대값 예측보다 상대적 순위를 정확히 학습
+    
+    Args:
+        predictions: 예측값 [batch, num_stocks]
+        labels: 실제값 [batch, num_stocks]
+        active_mask: 활성 종목 마스크 [batch, num_stocks]
+        margin: Margin 값
+    
+    Returns:
+        ranking_loss: 순위 손실
+    """
+    batch_size, num_stocks = predictions.shape
+    loss = 0.0
+    count = 0
+    
+    for b in range(batch_size):
+        pred = predictions[b]
+        true = labels[b]
+        
+        # 활성 종목만 사용
+        if active_mask is not None:
+            mask = active_mask[b]
+            pred = pred[mask]
+            true = true[mask]
+        
+        n = len(pred)
+        if n < 2:
+            continue
+        
+        # Pairwise comparison
+        for i in range(n):
+            for j in range(i+1, n):
+                # true[i] > true[j]면 pred[i]도 pred[j]보다 커야 함
+                if true[i] > true[j]:
+                    loss += torch.relu(margin + pred[j] - pred[i])
+                    count += 1
+                elif true[j] > true[i]:
+                    loss += torch.relu(margin + pred[i] - pred[j])
+                    count += 1
+    
+    return loss / max(count, 1)
+
+
+def combined_loss(predictions: torch.Tensor, labels: torch.Tensor,
+                  active_mask: torch.Tensor = None,
+                  alpha: float = 0.7, beta: float = 0.3) -> torch.Tensor:
+    """
+    Args:
+        predictions: 예측값
+        labels: 실제값
+        active_mask: 활성 마스크
+        alpha: MSE 가중치
+        beta: Ranking Loss 가중치
+    """
+    # MSE Loss
+    if active_mask is not None:
+        mse = F.mse_loss(predictions[active_mask], labels[active_mask])
+    else:
+        mse = F.mse_loss(predictions, labels)
+    
+    # Ranking Loss
+    rank_loss = pairwise_ranking_loss(predictions, labels, active_mask)
+    
+    return alpha * mse + beta * rank_loss
+
 
 
 # ============ 데이터셋 ============
@@ -348,12 +430,12 @@ def train_model(
     
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.5)
-    criterion = nn.MSELoss()
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer, T_0=20, T_mult=2, eta_min=1e-6
+    )
     
-    # ✅ Gradient Clipping 값
+    # [개선] Combined Loss 사용
     max_grad_norm = 1.0
-
     best_val_loss = float("inf")
     patience = 30
     patience_counter = 0
@@ -365,20 +447,26 @@ def train_model(
         train_batches = 0
 
         for batch in train_loader:
-            predictions, _ = model(batch["features"], batch["adj_matrix"])
-            loss = criterion(predictions, batch["labels"])
+            batch = {k: v.to(device) for k, v in batch.items()}
             
-            # ✅ NaN/Inf 체크
+            predictions, _ = model(batch["features"], batch["adj_matrix"])
+            
+            # [개선] Combined Loss
+            loss = combined_loss(
+                predictions, 
+                batch["labels"],
+                batch.get("active_mask"),
+                alpha=0.6,  # MSE 가중치
+                beta=0.4    # Ranking 가중치
+            )
+            
             if torch.isnan(loss) or torch.isinf(loss):
                 print(f"⚠️  Epoch {epoch}: Loss is NaN/Inf, skipping batch")
                 continue
 
             optimizer.zero_grad()
             loss.backward()
-            
-            # ✅ Gradient Clipping
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-            
             optimizer.step()
 
             train_loss += loss.item()
@@ -391,8 +479,16 @@ def train_model(
 
         with torch.no_grad():
             for batch in val_loader:
+                batch = {k: v.to(device) for k, v in batch.items()}
                 predictions, _ = model(batch["features"], batch["adj_matrix"])
-                loss = criterion(predictions, batch["labels"])
+                
+                loss = combined_loss(
+                    predictions,
+                    batch["labels"],
+                    batch.get("active_mask"),
+                    alpha=0.6,
+                    beta=0.4
+                )
                 
                 if not torch.isnan(loss) and not torch.isinf(loss):
                     val_loss += loss.item()
@@ -401,7 +497,7 @@ def train_model(
         avg_train_loss = train_loss / max(train_batches, 1)
         avg_val_loss = val_loss / max(val_batches, 1)
 
-        scheduler.step(avg_val_loss)
+        scheduler.step()
 
         # Early Stopping
         if avg_val_loss < best_val_loss:
@@ -411,10 +507,10 @@ def train_model(
         else:
             patience_counter += 1
             if patience_counter >= patience:
-                print(f"\nEarly stopping at epoch {epoch}")
+                print(f"\n⏹️  Early stopping at epoch {epoch}")
                 break
 
         if epoch % 10 == 0:
             print(f"Epoch {epoch}: Train={avg_train_loss:.6f}, Val={avg_val_loss:.6f}, Best Val={best_val_loss:.6f}")
 
-    print(f"\n최적 모델 저장: {save_path} (Best Val Loss: {best_val_loss:.6f})")
+    print(f"\n✅ 최적 모델 저장: {save_path} (Best Val Loss: {best_val_loss:.6f})")

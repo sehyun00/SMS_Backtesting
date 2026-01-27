@@ -146,12 +146,17 @@ class TGNNModel(BaseTGNNModel):
         from model import GraphConvLayer, TemporalAttention
 
         self.input_proj = nn.Linear(num_features, hidden_dims[0])
+        self.input_ln = nn.LayerNorm(hidden_dims[0])
 
         self.gcn_layers = nn.ModuleList(
             [
                 GraphConvLayer(hidden_dims[i], hidden_dims[i + 1])
                 for i in range(len(hidden_dims) - 1)
             ]
+        )
+
+        self.gcn_lns = nn.ModuleList(
+            [nn.LayerNorm(hidden_dims[i + 1]) for i in range(len(hidden_dims) - 1)]
         )
 
         self.temporal_attn = TemporalAttention(hidden_dims[-1], num_heads)
@@ -167,9 +172,12 @@ class TGNNModel(BaseTGNNModel):
 
     def _make_predictor(self, hidden_dim):
         return nn.Sequential(
-            nn.Linear(hidden_dim, 32),
+            nn.Linear(hidden_dim, 64),   
             nn.ReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(0.2),
+            nn.Linear(64, 32),            
+            nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(32, 1),
         )
 
@@ -180,8 +188,15 @@ class TGNNModel(BaseTGNNModel):
         for t in range(T):
             x_t = features[:, :, t, :]
             h = self.input_proj(x_t)
-            for gcn in self.gcn_layers:
-                h = gcn(h, adj_matrix)
+            h = self.input_ln(h)
+            for gcn, ln in zip(self.gcn_layers, self.gcn_lns):
+                h_new = gcn(h, adj_matrix)
+                h_new = ln(h_new)
+
+                if h.shape[-1] == h_new.shape[-1]:
+                    h = h_new + h
+                else:
+                    h = h_new
             gcn_outputs.append(h)
 
         temporal_features = torch.stack(gcn_outputs, dim=1)
@@ -194,33 +209,95 @@ class TGNNModel(BaseTGNNModel):
 
 # ============ 시각화 ============
 
+def plot_performance(strategies, all_metrics, save_dir):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
 
-def plot_performance(strategies, save_dir):
-    plt.figure(figsize=(14, 7))
+    def add_percent_labels(ax, x, vals, fmt="%.1f%%", offset=0.01):
+        """막대 위에 값(%) 표시"""
+        ymin, ymax = ax.get_ylim()
+        span = ymax - ymin
+        for xi, v in zip(x, vals):
+            ax.text(
+                xi,
+                v + span * offset,          # 막대 위에 살짝 띄워서
+                fmt % v,
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+
+    plt.close('all')
+    fig = plt.figure(figsize=(14, 8))
+
+    # 위쪽: 2/3 높이, 아래쪽: 1/3 높이로 설정
+    gs = fig.add_gridspec(3, 3, height_ratios=[2, 1, 0.001])  # 마지막 줄은 여백
+
+    # ---------- 1. 누적수익률 ----------
+    ax1 = fig.add_subplot(gs[0, :])
+
     for name, res in strategies.items():
-        if not res or not res.get("history"):
+        if not res or not res.get('history'):
             continue
-        df = pd.DataFrame(res["history"])
-        if "date" not in df.columns or "cumulative_return" not in df.columns:
+        df = pd.DataFrame(res['history'])
+        if 'date' not in df.columns or 'cumulative_return' not in df.columns:
             continue
-        dates = pd.to_datetime(df["date"])
-        vals = df["cumulative_return"]
-        plt.plot(dates, vals, label=name, linewidth=2)
+        dates = pd.to_datetime(df['date'])
+        vals = df['cumulative_return']
+        ax1.plot(dates, vals, label=name, linewidth=2)
 
-    plt.title("Performance Comparison: TGNN", fontsize=14, fontweight="bold")
-    plt.xlabel("Date", fontsize=12)
-    plt.ylabel("Cumulative Return (%)", fontsize=12)
-    plt.xlim(left=pd.Timestamp("2022-01-01"))
-    plt.grid(True, alpha=0.3)
-    plt.legend(loc="best", fontsize=10)
+    ax1.set_title("Performance Comparison: TGNN", fontsize=14, fontweight='bold')
+    ax1.set_xlabel("Date", fontsize=12)
+    ax1.set_ylabel("Cumulative Return (%)", fontsize=12)
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc='upper left', fontsize=9)
+    ymin, ymax = ax1.get_ylim()
+    ax1.set_ylim(ymin, ymax)
+
+    strategies_list = list(all_metrics.keys())
+    x = np.arange(len(strategies_list))
+
+    # ---------- 2-1. CAGR ----------
+    ax2 = fig.add_subplot(gs[1, 0])
+    cagr_vals = [all_metrics[s].get("cagr", 0.0) for s in strategies_list]
+    ax2.bar(x, cagr_vals, color="tab:blue", alpha=0.8)
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(strategies_list, rotation=30, ha="right", fontsize=8)
+    ax2.set_ylabel("CAGR (%)", fontsize=9)
+    ax2.set_title("CAGR", fontsize=10)
+    ax2.grid(True, axis='y', alpha=0.3)
+    add_percent_labels(ax2, x, cagr_vals)
+
+    # ---------- 2-2. MDD ----------
+    ax3 = fig.add_subplot(gs[1, 1])
+    mdd_vals = [all_metrics[s].get("max_drawdown", 0.0) for s in strategies_list]
+    ax3.bar(x, mdd_vals, color="tab:red", alpha=0.8)
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(strategies_list, rotation=30, ha="right", fontsize=8)
+    ax3.set_ylabel("MDD (%)", fontsize=9)
+    ax3.set_title("MDD", fontsize=10)
+    ax3.grid(True, axis='y', alpha=0.3)
+    add_percent_labels(ax3, x, mdd_vals, fmt="%.1f%%")
+
+    # ---------- 2-3. Avg Annual DD ----------
+    ax4 = fig.add_subplot(gs[1, 2])
+    avg_dd_vals = [all_metrics[s].get("avg_annual_drawdown", 0.0) for s in strategies_list]
+    ax4.bar(x, avg_dd_vals, color="tab:orange", alpha=0.8)
+    ax4.set_xticks(x)
+    ax4.set_xticklabels(strategies_list, rotation=30, ha="right", fontsize=8)
+    ax4.set_ylabel("Avg Annual DD (%)", fontsize=9)
+    ax4.set_title("Avg Annual DD", fontsize=10)
+    ax4.grid(True, axis='y', alpha=0.3)
+    add_percent_labels(ax4, x, avg_dd_vals, fmt="%.2f%%")
+
     plt.tight_layout()
     plt.savefig(save_dir / "comparison_graph.png", dpi=300)
     plt.close()
-    print(f"✅ 그래프 저장: {save_dir / 'comparison_graph.png'}")
+    print(f"✅ 저장: comparison_graph.png (시각화)")
 
 
 # ============ main (백테스트만) ============
-
 
 def main():
     print("=" * 60)
@@ -265,12 +342,24 @@ def main():
         if col in test_df.columns and col in train_mean:
             test_df[col] = (test_df[col] - train_mean[col]) / (train_std[col] + 1e-8)
 
+    test_df_scaled = test_df.copy()
     for mom_col in momentum_cols:
-        if mom_col in test_df.columns:
-            test_df[mom_col] = test_df[mom_col].clip(-0.4, 0.5)
+        if mom_col in test_df_scaled.columns:
+            test_df_scaled[mom_col] = test_df_scaled[mom_col] / 100.0
+            test_df_scaled[mom_col] = test_df_scaled[mom_col].clip(-0.5, 0.5)
 
     symbols = sorted(test_df["Symbol"].unique())
     print(f"종목 수(테스트): {len(symbols)}")
+
+    # ✅ Buy & Hold용: /100 적용 안 함
+    bnh_dataset = TGNN_Dataset(
+        test_df_original,  # /100 전 원본 데이터
+        window_size=12,
+        feature_cols=all_feature_cols,
+        symbols=symbols,
+        start_date="2021-01-01",
+        end_date="2024-12-31",
+    )
 
     test_dataset = TGNN_Dataset(
         test_df,
@@ -291,7 +380,8 @@ def main():
         num_heads=8,
         num_stocks=len(symbols),
     )
-    model.load_state_dict(torch.load(model_path, map_location="cpu"))
+    
+    model.load_state_dict(torch.load(model_path, map_location="cpu"), strict=False)
 
     # 백테스트
     config = BacktestConfig(
@@ -378,7 +468,7 @@ def main():
         filepath = RESULTS_DIR / filename
         bt.save_timeseries_csv(filepath)
 
-    plot_performance(all_strategies, RESULTS_DIR)
+    plot_performance(all_strategies, all_metrics, RESULTS_DIR)
 
     print(f"\n{'=' * 60}")
     print(f"✅ 완료! 결과 폴더: {RESULTS_DIR}")
