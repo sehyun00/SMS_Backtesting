@@ -1,0 +1,7 @@
+torch
+pandas
+numpy
+pyyaml
+pytest
+scikit-learn
+pandas-datareader

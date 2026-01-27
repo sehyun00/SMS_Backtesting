@@ -1,0 +1,43 @@
+# SMS_Backtesting 연구를 위한 전역 설정 (Global Configuration)
+
+project:
+  name: "Hybrid_TGNN_DDPG_Research"
+  seed: 42
+  device: "cuda" # 또는 "cpu"
+  selected_model: "tgnn"  # Options: "tgnn", "ddpg", "hybrid"
+
+paths:
+  data_dir: "../data"
+  processed_data: "../data/processed_daily_5factor_model.csv"
+  results_dir: "results"
+
+data:
+  window_size: 12
+  predict_window: 1
+  stock_universes: ["AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META", "UNH", "PLTR", "IONQ"]
+  features: ["Open", "High", "Low", "Close", "Volume"] 
+  # 5-Factor Data will be added during preprocessing
+  factors:
+    weights:
+      value: 0.3
+      momentum: 0.3
+      volatility: 0.2
+      beta: 0.2
+
+model:
+  tgnn:
+    hidden_dim: 64
+    num_heads: 4
+    dropout: 0.1
+  ddpg:
+    actor_lr: 0.0001
+    critic_lr: 0.001
+    gamma: 0.99
+    tau: 0.001
+    buffer_size: 10000
+    batch_size: 64
+
+training:
+  episodes: 800
+  early_stopping: 50
+  test_split_date: "2021-01-01"
