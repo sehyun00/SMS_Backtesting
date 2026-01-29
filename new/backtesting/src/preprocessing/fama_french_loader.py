@@ -1,6 +1,6 @@
 import pandas as pd
 import pandas_datareader.data as web
-from datetime import datetime
+
 from typing import Optional
 import logging
 
@@ -54,7 +54,7 @@ class FamaFrenchLoader:
             self.logger.error(f"❌ Failed to download Fama-French data: {e}")
             return None
 
-    def merge_with_stock_data(self, stock_df: pd.DataFrame) -> pd.DataFrame:
+    def merge_factors(self, stock_df: pd.DataFrame) -> pd.DataFrame:
         """
         Merges stock data with Fama-French data on Date.
         """

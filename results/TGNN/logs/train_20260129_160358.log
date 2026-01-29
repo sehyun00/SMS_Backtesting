@@ -1,0 +1,21 @@
+2026-01-29 16:03:58,561 - INFO - Starting training for 800 epochs on cuda
+2026-01-29 16:04:05,623 - INFO - Epoch 0/800 | Loss: 0.629106
+2026-01-29 16:04:05,634 - INFO - Saved best model (Loss: 0.629106) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:04:12,360 - INFO - Saved best model (Loss: 0.383991) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:04:19,871 - INFO - Saved best model (Loss: 0.323356) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:04:27,043 - INFO - Saved best model (Loss: 0.295255) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:04:34,017 - INFO - Saved best model (Loss: 0.276733) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:04:40,741 - INFO - Saved best model (Loss: 0.259913) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:04:47,237 - INFO - Saved best model (Loss: 0.254482) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:04:53,886 - INFO - Saved best model (Loss: 0.242539) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:05:00,220 - INFO - Saved best model (Loss: 0.235544) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:05:06,888 - INFO - Saved best model (Loss: 0.230982) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:05:13,601 - INFO - Epoch 10/800 | Loss: 0.224503
+2026-01-29 16:05:13,610 - INFO - Saved best model (Loss: 0.224503) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:05:20,050 - INFO - Saved best model (Loss: 0.221144) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:05:26,826 - INFO - Saved best model (Loss: 0.214251) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:05:33,230 - INFO - Saved best model (Loss: 0.212122) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:05:40,075 - INFO - Saved best model (Loss: 0.207486) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:05:47,464 - INFO - Saved best model (Loss: 0.204712) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:05:54,476 - INFO - Saved best model (Loss: 0.202857) to results\tgnn\checkpoints\best_model_20260129_160358.pth
+2026-01-29 16:06:01,761 - INFO - Saved best model (Loss: 0.197326) to results\tgnn\checkpoints\best_model_20260129_160358.pth

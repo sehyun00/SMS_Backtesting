@@ -22,7 +22,6 @@ ENV/
 !data/stock_list.csv
 
 # Models
-*.pth
 *.pt
 *.h5
 

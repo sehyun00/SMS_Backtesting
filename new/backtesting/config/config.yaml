@@ -14,7 +14,7 @@ paths:
 data:
   window_size: 12
   predict_window: 1
-  stock_universes: ["AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMZN", "META", "UNH", "PLTR", "IONQ"]
+  stock_universes: ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "JPM", "UNH", "V", "IONQ"] # Empty list = Use ALL stocks found in data (approx 55)
   features: ["Open", "High", "Low", "Close", "Volume"] 
   # 5-Factor Data will be added during preprocessing
   factors:

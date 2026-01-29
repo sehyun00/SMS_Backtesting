@@ -23,6 +23,7 @@ class Trainer:
         self.config = config
         self.model = model
         self.device = model.device
+        self.model_type = config["project"].get("selected_model", "tgnn").lower()
 
         # Data Loader
         self.batch_size = config["model"]["ddpg"][
@@ -47,7 +48,12 @@ class Trainer:
         # Organize results by model name
         model_name = config["project"].get("selected_model", "default")
         self.results_dir = os.path.join(config["paths"]["results_dir"], model_name)
+        self.log_dir = os.path.join(self.results_dir, "logs")
+        self.ckpt_dir = os.path.join(self.results_dir, "checkpoints")
+
         os.makedirs(self.results_dir, exist_ok=True)
+        os.makedirs(self.log_dir, exist_ok=True)
+        os.makedirs(self.ckpt_dir, exist_ok=True)
 
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.logger = self._setup_logger()
@@ -56,7 +62,7 @@ class Trainer:
         logger = logging.getLogger(f"Trainer_{self.timestamp}")
         logger.setLevel(logging.INFO)
         fh = logging.FileHandler(
-            os.path.join(self.results_dir, f"train_{self.timestamp}.log")
+            os.path.join(self.log_dir, f"train_{self.timestamp}.log")
         )
         ch = logging.StreamHandler()
         formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -65,6 +71,52 @@ class Trainer:
         logger.addHandler(fh)
         logger.addHandler(ch)
         return logger
+
+    def _run_epoch(self, epoch_idx: int) -> float:
+        """
+        Runs a single epoch of training.
+        Returns:
+            avg_loss: Average loss for the epoch
+        """
+        self.model.train()
+        total_loss = 0
+
+        for batch in self.dataloader:
+            # Move to device
+            features = batch["features"].to(self.device)
+            adj = batch["adj_matrix"].to(self.device)
+            labels = batch["labels"].to(self.device)
+
+            self.optimizer.zero_grad()
+
+            if self.model_type == "tgnn":
+                # Multi-Task Logic
+                heads = ["Momentum1M", "Momentum3M", "Momentum6M", "Momentum12M"]
+                batch_loss = 0
+                for i, target_head in enumerate(heads):
+                    output = self.model(features, adj, target_type=target_head)
+                    preds = output[0] if isinstance(output, tuple) else output
+                    target_labels = labels[:, :, i]
+                    if preds.shape != target_labels.shape:
+                        preds = preds.view_as(target_labels)
+                    loss = self.criterion(preds, target_labels)
+                    batch_loss += loss
+                batch_loss.backward()
+                total_loss += batch_loss.item()
+            else:
+                # Generic / DDPG Logic
+                output = self.model(features, adj)
+                preds = output[0] if isinstance(output, tuple) else output
+                target_labels = labels[:, :, 0]
+                if preds.shape != target_labels.shape:
+                    preds = preds.view_as(target_labels)
+                loss = self.criterion(preds, target_labels)
+                loss.backward()
+                total_loss += loss.item()
+
+            self.optimizer.step()
+
+        return total_loss / len(self.dataloader)
 
     def train(self):
         """
@@ -76,48 +128,7 @@ class Trainer:
         best_loss = float("inf")
 
         for epoch in range(epochs):
-            self.model.train()
-            total_loss = 0
-
-            for batch in self.dataloader:
-                # Move to device
-                features = batch["features"].to(self.device)
-                adj = batch["adj_matrix"].to(self.device)
-                labels = batch["labels"].to(self.device)  # [B, N]
-
-                self.optimizer.zero_grad()
-
-                # Forward
-                # Check model type to determine output
-                # TGNN returns (predictions, embeddings)
-                # Hybrid returns ... (it's an Agent, specialized training needed?)
-                # This Trainer assumes a generic supervised API for now.
-                # If Hybrid/DDPG, we need a specialized RL loop.
-                # Let's assume this generic Trainer is for TGNN pre-training or simple supervision.
-                # For RL, we might need 'RLTrainer'.
-
-                output = self.model(features, adj)
-
-                # Handle tuple return
-                if isinstance(output, tuple):
-                    preds = output[0]
-                else:
-                    preds = output
-
-                # Verify shape match for generic MSE
-                # Labels might be [B, N], Preds [B, N]
-                if preds.shape != labels.shape:
-                    # Simple fix if one is [B, N, 1]
-                    preds = preds.squeeze()
-                    labels = labels.squeeze()
-
-                loss = self.criterion(preds, labels)
-                loss.backward()
-                self.optimizer.step()
-
-                total_loss += loss.item()
-
-            avg_loss = total_loss / len(self.dataloader)
+            avg_loss = self._run_epoch(epoch)
 
             if epoch % 10 == 0:
                 self.logger.info(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.6f}")
@@ -126,8 +137,47 @@ class Trainer:
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 save_path = os.path.join(
-                    self.results_dir, f"best_model_{self.timestamp}.pth"
+                    self.ckpt_dir, f"best_model_{self.timestamp}.pth"
+                )
+                self.model.save(save_path)
+                self.logger.info(
+                    f"Saved best model (Loss: {best_loss:.6f}) to {save_path}"
+                )
+
+        # Save Final Model as well
+        final_path = os.path.join(self.ckpt_dir, f"final_model_{self.timestamp}.pth")
+        self.model.save(final_path)
+        self.logger.info(f"Saved final model to {final_path}")
+
+        self.logger.info(f"Training Complete. Best Loss: {best_loss:.6f}")
+
+    def finetune(self, epochs: int = 50, lr_factor: float = 0.1):
+        """
+        Fine-tune a pre-trained model on new data (Transfer Learning).
+        """
+        self.logger.info(
+            f"Starting Fine-tuning for {epochs} epochs (LR factor: {lr_factor})"
+        )
+
+        # Adjust Learning Rate
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = self.lr * lr_factor
+
+        best_loss = float("inf")
+
+        for epoch in range(epochs):
+            avg_loss = self._run_epoch(epoch)
+
+            if epoch % 10 == 0:
+                self.logger.info(
+                    f"Finetune Epoch {epoch}/{epochs} | Loss: {avg_loss:.6f}"
+                )
+
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+                save_path = os.path.join(
+                    self.ckpt_dir, f"finetuned_model_{self.timestamp}.pth"
                 )
                 self.model.save(save_path)
 
-        self.logger.info(f"Training Complete. Best Loss: {best_loss:.6f}")
+        self.logger.info(f"Fine-tuning Complete. Best Loss: {best_loss:.6f}")

@@ -83,6 +83,13 @@ class FinancialDataset(Dataset):
             # [N, T, F]
             features_array = np.array(batch_features)
 
+            # Robust Z-Score Normalization per Window
+            # Normalize each feature across (Nodes, Time)
+            # This handles scale disparity (e.g. Volume vs Price vs Factors)
+            mean = np.mean(features_array, axis=(0, 1), keepdims=True)
+            std = np.std(features_array, axis=(0, 1), keepdims=True)
+            features_array = (features_array - mean) / (std + 1e-8)
+
             # Create Graph (Adjacency Matrix)
             # Using last date of window for correlation/structure
             last_date = window_dates[-1]
@@ -90,19 +97,25 @@ class FinancialDataset(Dataset):
 
             target_df = self.df.loc[str(target_date)]
             labels_list = []
+            target_cols = ["Momentum1M", "Momentum3M", "Momentum6M", "Momentum12M"]
+
             for symbol in self.symbols:
                 row = target_df[target_df["Symbol"] == symbol]
-                if not row.empty and "Momentum1M" in row:
-                    labels_list.append(row["Momentum1M"].values[0])
+                if not row.empty:
+                    # Collect all targets
+                    vals = [
+                        row[col].values[0] if col in row else 0.0 for col in target_cols
+                    ]
+                    labels_list.append(vals)
                 else:
-                    labels_list.append(0.0)
+                    labels_list.append([0.0] * len(target_cols))
 
             windows.append(
                 {
                     "features": torch.FloatTensor(features_array),  # [N, T, F]
                     "adj_matrix": torch.FloatTensor(adj_matrix),
-                    "labels": torch.FloatTensor(labels_list),
-                    "date": target_date,
+                    "labels": torch.FloatTensor(labels_list),  # [N, 4]
+                    "date": str(target_date),
                 }
             )
 

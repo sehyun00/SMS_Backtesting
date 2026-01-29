@@ -81,7 +81,7 @@ class Pipeline:
         try:
             self.ff_loader.download_factors(
                 start_date=f"{self.start_year}-01-01",
-                end_date=f"{self.end_year}-12-31",
+                end_date=f"{self.end_year}-12-31",  # Fama-French loader handles this internally/pandas-datareader usually checks range
             )
         except Exception as e:
             print(f"⚠️ Fama-French 다운로드 실패: {e}")
@@ -93,7 +93,7 @@ class Pipeline:
         train_data_list = self._collect_and_process(
             train_candidate_stocks,
             start_date="2006-01-01",
-            end_date="2020-12-31",
+            end_date="2021-01-01",  # 2020-12-31 포함을 위해 +1일
             config=config,
         )
 
@@ -104,7 +104,7 @@ class Pipeline:
         test_data_list = self._collect_and_process(
             test_candidate_stocks,
             start_date="2021-01-01",
-            end_date="2025-12-31",
+            end_date="2026-01-01",  # 2025-12-31 포함을 위해 +1일
             config=config,
         )
 
@@ -142,7 +142,7 @@ class Pipeline:
             )
 
             final_train_df, final_test_df, train_symbols, test_symbols = (
-                splitter.split_by_sector(train_per_sector=5, test_total=7)
+                splitter.split_by_sector(train_per_sector=5, test_total=10)
             )
 
             # 9. 저장

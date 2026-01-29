@@ -34,6 +34,38 @@ class BaseModel(nn.Module, ABC):
         """Saves model state dict."""
         torch.save(self.state_dict(), path)
 
-    def load(self, path: str):
-        """Loads model state dict."""
-        self.load_state_dict(torch.load(path, map_location=self.device))
+    def load(self, path: str, strict: bool = True):
+        """
+        Loads model state dict.
+        If strict=False, ignores keys with shape mismatches (Partial Loading).
+        """
+        loaded_state_dict = torch.load(path, map_location=self.device)
+
+        if not strict:
+            model_state_dict = self.state_dict()
+            filtered_state_dict = {}
+            skipped_layers = []
+
+            for k, v in loaded_state_dict.items():
+                if k in model_state_dict:
+                    if v.shape == model_state_dict[k].shape:
+                        filtered_state_dict[k] = v
+                    else:
+                        skipped_layers.append(k)
+                else:
+                    # Key not in model (unexpected key), skip if not strict
+                    pass
+
+            if skipped_layers:
+                print(
+                    f"      ⚠️ Partial Loading: Skipped {len(skipped_layers)} layers due to shape mismatch:"
+                )
+                for k in skipped_layers[:3]:  # Show first 3 only
+                    print(f"         - {k}")
+                if len(skipped_layers) > 3:
+                    print(f"         ... and {len(skipped_layers) - 3} more.")
+
+            # Load with strict=False to allow missing keys (since we filtered some out)
+            self.load_state_dict(filtered_state_dict, strict=False)
+        else:
+            self.load_state_dict(loaded_state_dict, strict=True)

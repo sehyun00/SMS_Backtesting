@@ -138,7 +138,7 @@ class DataCollector:
                 print(f"  ({idx + 1}/{total}) ✅ {ticker}: {sector}")
                 time.sleep(0.1)  # API 제한 방지
 
-            except Exception as e:
+            except Exception:
                 print(f"  ({idx + 1}/{total}) ⚠️ {ticker}: 실패")
                 enriched_data.append(
                     {
@@ -237,7 +237,7 @@ class DataCollector:
                 hist = yf.download(
                     symbol,
                     start=f"{start_year}-01-01",
-                    end=f"{end_year}-12-31",
+                    end=f"{end_year + 1}-01-01",
                     progress=False,
                     auto_adjust=True,
                 )
@@ -285,7 +285,9 @@ class DataCollector:
             OHLCV DataFrame 또는 None
         """
         try:
-            df = yf.download(symbol, start=start_date, end=end_date, progress=False)
+            df = yf.download(
+                symbol, start=start_date, end=end_date, progress=False, auto_adjust=True
+            )
 
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)

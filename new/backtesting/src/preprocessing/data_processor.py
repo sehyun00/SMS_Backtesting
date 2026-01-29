@@ -53,4 +53,4 @@ class DataProcessor:
         if self.ff_loader.ff_data is None:
             self.ff_loader.download_factors()
 
-        return self.ff_loader.merge_with_stock_data(df)
+        return self.ff_loader.merge_factors(df)
