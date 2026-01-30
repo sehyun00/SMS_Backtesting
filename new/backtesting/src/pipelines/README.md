@@ -26,8 +26,15 @@
 2.  **종목 유니버스 확인 및 전이 학습 (Transfer Learning)**:
     *   사용자가 `config.yaml`에 지정한 **Test Universe(예: 10개)**와 학습된 **Train Universe(예: 55개)**를 비교합니다.
     *   **Mismatch 발생 시**: `strict=False`로 모델 가중치를 부분 로드하고, `Trainer.finetune()`을 자동 실행하여 소수 종목에 모델을 적응시킵니다.
-3.  **전략 실행**: Benchmark(Buy&Hold) 및 Model Strategy 실행.
-4.  **결과 저장**: 거래 로그(`trade_logs.csv`), 성과 지표(CAGR, MDD), 비교 그래프(`comparison.png`) 생성.
+3.  **전략 실행 (Strategy Execution)**:
+    *   **Benchmark**: Buy & Hold 전략.
+    *   **Model Strategy**:
+        *   **TGNN (Horizon Matching)**: 투자 주기와 예측 주기를 일치시키는 전략 (예: 월간 투자 시 1개월 예측값 `Momentum1M` 사용).
+        *   **DDPG**: 포트폴리오 최적화 가중치를 사용하며, 다양한 리밸런싱 주기 테스트.
+4.  **결과 저장**:
+    *   **로그**: `results/{model}/logs/` (거래 내역)
+    *   **모델**: `results/{model}/checkpoints/` (가중치 파일)
+    *   **시각화**: `results/{model}/plots/` (수익률 비교 그래프)
 
 ## 🚀 사용법 (Usage)
 

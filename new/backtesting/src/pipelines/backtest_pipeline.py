@@ -75,11 +75,42 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
             f"      User requested specific Test Universe: {len(user_test_universe)} symbols."
         )
         config["data"]["stock_universes"] = user_test_universe
-    elif trained_universe and len(trained_universe) > 0:
-        print(
-            f"      No specific test universe in config. Defaulting to Training Universe ({len(trained_universe)} symbols)."
-        )
-        config["data"]["stock_universes"] = trained_universe
+    elif test_df is not None and not test_df.empty:
+        # Detect Intersection (Valid Test vs Trained)
+        inferred = set(test_df["Symbol"].unique())
+        trained = set(trained_universe) if trained_universe else set()
+
+        valid_subset = sorted(list(inferred & trained))
+        excluded = sorted(list(inferred - trained))
+
+        print(f"      Inferred Test Data: {len(inferred)} symbols.")
+
+        # If intersection exists, enable masking for those stocks
+        if valid_subset:
+            print(
+                f"      ✅ Intersection Detected! Enabling Subset Masking for {len(valid_subset)} stocks."
+            )
+            if excluded:
+                print(
+                    f"      ⚠️ Excluded {len(excluded)} symbols not in training set: {excluded}"
+                )
+
+            config["data"]["test_valid_subset"] = valid_subset
+
+    if trained_universe and len(trained_universe) > 0:
+        # Check if Model is Asset-Agnostic (DDPG, Hybrid)
+        if model_type in ["ddpg", "hybrid"]:
+            print(
+                f"      ℹ️ Model ({model_type}) is Asset-Agnostic. Using Test Data Universe ({len(inferred)} symbols) instead of Training Universe."
+            )
+            # Use Inferred Test Universe
+            config["data"]["stock_universes"] = sorted(list(inferred))
+        else:
+            # TGNN (Graph Fixed): Default to Training Universe to maintain Graph Structure
+            print(
+                f"      No specific test universe in config. Defaulting to Training Universe ({len(trained_universe)} symbols)."
+            )
+            config["data"]["stock_universes"] = trained_universe
     else:
         # Fallback to whatever is in CSV
         pass
@@ -155,11 +186,14 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
             model.load(model_path, strict=False)
             print("      ✅ Partial weights loaded (Encoder transferred).")
 
-            # Run Fine-tuning
-            print("\n[3.5] Fine-tuning Model on Test Data...")
-            trainer = Trainer(config, model, dataset)
-            trainer.finetune(epochs=50, lr_factor=0.1)
-            print("      ✅ Fine-tuning completed.")
+            # [Research Rule] DO NOT Fine-tune on Test Data (Look-ahead Bias)
+            print(
+                "      🔒 Finite-tuning disabled to prevent Data Leakage (Research Integrity)."
+            )
+            # print("\n[3.5] Fine-tuning Model on Test Data...")
+            # trainer = Trainer(config, model, dataset)
+            # trainer.finetune(epochs=50, lr_factor=0.1)
+            # print("      ✅ Fine-tuning completed.")
         else:
             # Strict Load
             model.load(model_path, strict=True)
@@ -180,11 +214,25 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
     # 2. Model Strategy
     # Check if model has multiple heads (like TGNN)
     if hasattr(model, "heads"):
-        for head in model.heads:
-            print(f"\n[Target: {head}]")
-            results[f"Model_{head}"] = backtester.run_strategy(
-                strategy_type="model", target_head=head
+        # 2. TGNN Rebalancing Strategies (Horizon Matching)
+        print(f"\n[Model: TGNN Rebalancing Strategies (Horizon Matching)]")
+        # Map: Frequency Name -> (Interval, Target Head)
+        horizon_map = {
+            "Monthly": (21, "Momentum1M"),
+            "Quarterly": (63, "Momentum3M"),
+            "Semiannual": (126, "Momentum6M"),
+            "Annual": (252, "Momentum12M"),
+        }
+
+        for freq_name, (interval, target_head) in horizon_map.items():
+            run_name = f"TGNN_{freq_name}"
+            print(f"\n[Strategy: {freq_name} Rebalancing | Head: {target_head}]")
+            results[run_name] = backtester.run_strategy(
+                strategy_type="model",
+                target_head=target_head,
+                rebalance_interval=interval,
             )
+
     else:
         # RL (DDPG) or Hybrid - Single Policy
         # Iterate over Rebalancing Frequencies

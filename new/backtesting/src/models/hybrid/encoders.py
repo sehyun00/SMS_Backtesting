@@ -46,25 +46,3 @@ class TGNNEncoder(nn.Module):
         temporal_features = torch.stack(gcn_outputs, dim=2).permute(0, 2, 1, 3)
         node_embeddings = self.temporal_attn(temporal_features)
         return node_embeddings
-
-
-class DDPGEncoder(nn.Module):
-    """
-    Encoder part of DDPG.
-    Processes flat state (features + adj) into a hidden representation.
-    """
-
-    def __init__(self, input_dim: int, hidden_dim: int = 128):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(256, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)

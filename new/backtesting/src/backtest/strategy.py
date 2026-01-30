@@ -77,34 +77,23 @@ class StrategyHandler:
                 preds, _ = model(features, adj, target_type=target_head)
                 scores = preds.cpu().numpy()[0]  # [N]
 
-                return self._calculate_top_k_weights(scores)
+                return self._calculate_softmax_weights(scores)
 
-    def _calculate_top_k_weights(self, scores: np.ndarray) -> np.ndarray:
+    def _calculate_softmax_weights(self, scores: np.ndarray) -> np.ndarray:
         """
-        Dynamic Top-K + Softmax Weighting Strategy.
+        Full Universe Softmax Strategy (Research Standard).
+        Applies Softmax to ALL stock scores to determine weights.
         """
-        # Dynamic Top-K: Select top 30% of stocks, at least 1, max 10.
-        ratio_k = int(self.n_stocks * 0.3)
-        TOP_K = max(1, min(10, ratio_k))
-
-        current_weights = np.zeros(self.n_stocks)
-
-        # Get indices of top K scores
-        top_k_indices = np.argsort(scores)[-TOP_K:]
-        top_k_scores = scores[top_k_indices]
-
-        # Softmax Weighting (Score-based)
-        if top_k_scores.std() > 1e-6:
-            z_scores = (top_k_scores - top_k_scores.mean()) / top_k_scores.std()
-            exp_scores = np.exp(z_scores)
-            top_k_weights = exp_scores / np.sum(exp_scores)
+        # score-based weighting (Softmax)
+        # 1. Normalize scores (Z-score) to prevent softmax saturation
+        if scores.std() > 1e-6:
+            z_scores = (scores - scores.mean()) / scores.std()
         else:
-            top_k_weights = np.ones(TOP_K) / TOP_K
+            z_scores = scores - scores.mean()
 
-        current_weights[top_k_indices] = top_k_weights
+        # 2. Apply Softmax with temperature (optional, default 1.0)
+        # Using a slight temperature > 1 can smooth out extreme bets if needed, but 1.0 is standard.
+        exp_scores = np.exp(z_scores)
+        weights = exp_scores / np.sum(exp_scores)
 
-        # Fallback for NaNs
-        if np.isnan(current_weights).any():
-            current_weights[top_k_indices] = 1.0 / TOP_K
-
-        return current_weights
+        return weights

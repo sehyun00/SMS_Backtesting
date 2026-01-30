@@ -120,6 +120,100 @@ def verify_model(model_name: str, df, symbols, feature_cols):
         return False
 
 
+def verify_asset_agnostic():
+    print(f"\n🔍 Verifying Asset-Agnostic Properties ...")
+
+    # 1. Create Data with DIFFERENT number of stocks
+    # Init Config has 3 stocks (AAPL, GOOGL, MSFT)
+    # We want to test if model accepts 5 stocks
+    df, _, features = create_mock_data()  # Default 3
+
+    # Create 5-stock mock data
+    dates = pd.date_range(start="2010-01-01", periods=10, freq="ME")
+    symbols_5 = ["A", "B", "C", "D", "E"]
+    data_5 = []
+    for date in dates:
+        for sym in symbols_5:
+            row = {
+                "Date": date,
+                "Symbol": sym,
+                "Sector": "Tech",
+                "Open": 100,
+                "High": 105,
+                "Low": 95,
+                "Close": 100,
+                "Volume": 1000,
+            }
+            for f in features:
+                row[f] = np.random.randn()
+            # Factors
+            for f in [
+                "Momentum_Factor",
+                "Value_Factor",
+                "Beta_Factor",
+                "Volatility_Factor",
+            ]:
+                row[f] = np.random.randn()
+            data_5.append(row)
+    df_5 = pd.DataFrame(data_5)
+    df_5.set_index("Date", inplace=True)
+
+    # Config
+    config_path = Path(__file__).parent / "config/config.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    config["data"]["stock_universes"] = symbols_5  # 5 stocks
+    config["data"]["features"] = features
+
+    # Dataset with 5 stocks
+    dataset_5 = FinancialDataset(config=config, data=df_5, mode="train")
+
+    # Initialize Models (Agent will see config has 5 stocks, but we want to see if it runs)
+    # Actually, let's init with 3, and run with 5.
+    config["data"]["stock_universes"] = ["A", "B", "C"]  # Agent thinks 3
+
+    print("   Testing DDPG (Init 3 -> Run 5)...")
+    try:
+        agent = DDPGAgent(config)
+        # Manually create batch of 5
+        batch = next(iter(torch.utils.data.DataLoader(dataset_5, batch_size=2)))
+        # batch features: [B, 5, T, F]
+        x = batch["features"].to(agent.device)
+        w = agent.forward(x)  # Should output [B, 5]
+        if w.shape[1] == 5:
+            print("   ✅ DDPG handled 5 stocks successfully!")
+        else:
+            print(f"   ❌ DDPG output shape mismatch: {w.shape}")
+            return False
+
+    except Exception as e:
+        print(f"   ❌ DDPG Failed: {e}")
+        traceback.print_exc()
+        return False
+
+    print("   Testing Hybrid (Init 3 -> Run 5)...")
+    try:
+        agent = HybridAgent(config)
+        batch = next(iter(torch.utils.data.DataLoader(dataset_5, batch_size=2)))
+        x = batch["features"].to(agent.device)
+        adj = batch["adj_matrix"].to(agent.device)  # [B, 5, 5]
+
+        w = agent.forward(x, adj)
+        if w.shape[1] == 5:
+            print("   ✅ Hybrid handled 5 stocks successfully!")
+        else:
+            print(f"   ❌ Hybrid output shape mismatch: {w.shape}")
+            return False
+
+    except Exception as e:
+        print(f"   ❌ Hybrid Failed: {e}")
+        traceback.print_exc()
+        return False
+
+    print("🎉 Asset-Agnostic Verification PASSED")
+    return True
+
+
 def verify_all():
     df, symbols, features = create_mock_data()
 
@@ -129,13 +223,16 @@ def verify_all():
     for m in models:
         results[m] = verify_model(m, df, symbols, features)
 
+    # ADDED: Test Asset Agnostic
+    results["asset_agnostic"] = verify_asset_agnostic()
+
     print("\n" + "=" * 30)
     print("FINAL RESULTS")
     print("=" * 30)
     all_pass = True
     for m, res in results.items():
         status = "PASSED" if res else "FAILED"
-        print(f"{m.upper():<10}: {status}")
+        print(f"{m.upper():<15}: {status}")
         if not res:
             all_pass = False
 

@@ -4,7 +4,7 @@ project:
   name: "Hybrid_TGNN_DDPG_Research"
   seed: 42
   device: "cuda" # 또는 "cpu"
-  selected_model: "tgnn"  # Options: "tgnn", "ddpg", "hybrid"
+  selected_model: "ddpg"  # Options: "tgnn", "ddpg", "hybrid"
 
 paths:
   data_dir: "../data"
@@ -14,7 +14,7 @@ paths:
 data:
   window_size: 12
   predict_window: 1
-  stock_universes: ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "JPM", "UNH", "V", "IONQ"] # Empty list = Use ALL stocks found in data (approx 55)
+  stock_universes: [] # Empty list = Use ALL stocks found in data (approx 55)
   features: ["Open", "High", "Low", "Close", "Volume"] 
   # 5-Factor Data will be added during preprocessing
   factors:
@@ -25,6 +25,7 @@ data:
       beta: 0.2
 
 model:
+  softmax_temperature: 2 # Global: Controls Portfolio Diversification (>1.0: Diverse, <1.0: Concentrated)
   tgnn:
     hidden_dim: 64
     num_heads: 4

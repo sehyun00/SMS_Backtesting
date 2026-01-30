@@ -31,8 +31,8 @@
 지도 학습 모델(TGNN, Generic)의 수명 주기를 관리합니다.
 
 *   **주요 메서드**:
-    *   `train()`: 전체 데이터셋에 대해 학습을 수행하고 Checkpoint를 저장합니다.
-    *   `finetune(epochs, lr_factor)`: **전이 학습(Transfer Learning)**을 위해, 사전 학습된 모델을 새로운 데이터셋(예: 다른 종목 유니버스)에 맞춰 미세 조정합니다. 중복 로직 방지를 위해 `_run_epoch()`를 공유합니다.
+    *   `train()`: 전체 데이터셋에 대해 학습을 수행하고 Checkpoint를 `results/{model}/checkpoints/`에 저장합니다.
+    *   `finetune(epochs, lr_factor)`: **전이 학습(Transfer Learning)**을 위해, 사전 학습된 모델을 새로운 데이터셋(예: 다른 종목 유니버스)에 맞춰 미세 조정합니다. 로그는 `results/{model}/logs/`에 저장됩니다.
 
 ### 3. RL Trainer (`rl_trainer.py`)
 강화학습 에이전트(DDPG, Hybrid)를 학습합니다.

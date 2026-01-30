@@ -10,7 +10,7 @@
 | `engine.py` | 백테스트 시뮬레이션의 핵심 엔진. 날짜별로 루프를 돌며 자산(Equity) 변화를 추적합니다. |
 | `strategy.py` | 모델 출력(Score/Action)을 포트폴리오 비중(Weights)으로 변환하는 전략 핸들러. |
 | `metrics.py` | CAGR, MDD, Sharpe Ratio 등 금융 성과 지표 계산. |
-| `visualization.py` | 백테스트 결과(수익률 곡선, 종목별 비중 등)를 그래프로 시각화. |
+| `visualization.py` | 백테스트 결과 시각화 및 관리. 그래프(`plots/`)와 거래 로그(`logs/`)를 분리하여 저장합니다. |
 
 ## 🏗️ 백테스트 프로세스 & Top-K 전략
 

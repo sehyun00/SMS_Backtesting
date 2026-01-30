@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from typing import Dict, Any
 import logging
 from datetime import datetime
+import numpy as np
 
 from ..models.base_model import BaseModel
 from .dataset import FinancialDataset
@@ -104,17 +105,60 @@ class Trainer:
                 batch_loss.backward()
                 total_loss += batch_loss.item()
             else:
-                # Generic / DDPG Logic
-                output = self.model(features, adj)
-                preds = output[0] if isinstance(output, tuple) else output
-                target_labels = labels[:, :, 0]
-                if preds.shape != target_labels.shape:
-                    preds = preds.view_as(target_labels)
-                loss = self.criterion(preds, target_labels)
-                loss.backward()
-                total_loss += loss.item()
+                # DDPG / RL Loop
+                # 1. Prepare Data
+                next_features = batch["next_features"].to(self.device)
 
-            self.optimizer.step()
+                # 2. Select Action (Batch Exploration)
+                self.model.actor.eval()
+                with torch.no_grad():
+                    action_probs, _ = self.model.actor(features)
+                    actions = action_probs.cpu().numpy()  # [B, N]
+
+                # Add Dirichlet Noise (Vectorized)
+                # alpha = action * concentration
+                noise_std = 0.1
+                conc = actions / (noise_std + 1e-8)
+                conc = np.clip(conc, 0.1, 100.0)
+
+                # Sample noisy actions
+                noisy_actions = np.array([np.random.dirichlet(c) for c in conc])
+                noisy_actions = torch.FloatTensor(noisy_actions).to(self.device)
+
+                # 3. Calculate Reward (Portfolio Return)
+                target_returns = labels[:, :, 0]  # [B, N]
+                if noisy_actions.shape != target_returns.shape:
+                    target_returns = target_returns.view_as(noisy_actions)
+
+                # Reward = Portfolio Return
+                rewards = torch.sum(
+                    noisy_actions * target_returns, dim=1, keepdim=True
+                )  # [B, 1]
+
+                # 4. Push to Buffer
+                dones = torch.zeros_like(rewards)  # Continuous task
+
+                self.model.buffer.push_batch(
+                    features.cpu().numpy(),
+                    noisy_actions.cpu().numpy(),
+                    rewards.cpu().numpy(),
+                    next_features.cpu().numpy(),
+                    dones.cpu().numpy(),
+                )
+
+                # 5. Update Agent
+                metrics = self.model.update()
+
+                if metrics:
+                    loss = metrics["critic_loss"] + metrics["actor_loss"]  # For logging
+                    total_loss += loss
+                else:
+                    # Buffer not full yet
+                    loss = 0
+
+            # Only step main optimizer if NOT DDPG (DDPG has internal optimizers)
+            if self.model_type != "ddpg":
+                self.optimizer.step()
 
         return total_loss / len(self.dataloader)
 

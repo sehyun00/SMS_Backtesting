@@ -250,6 +250,14 @@ class DataCollector:
 
                 # Train 기간 확인 (2006-2020)
                 train_data = hist[hist.index.year <= train_end]
+
+                # 1. 데이터 시작일 체크 (Survivorship Bias 방지)
+                # 요청하신 대로 start_year(2006)부터 데이터가 존재하는 종목만 선별
+                if train_data.empty or train_data.index[0].year > start_year:
+                    # print(f"  ({idx + 1}/{total}) ⚠️ {symbol}: {start_year}년 데이터 부재 (Start: {train_data.index[0].year if not train_data.empty else 'N/A'})")
+                    continue
+
+                # 2. 데이터 길이 체크
                 if len(train_data) >= 5 * 200:  # 최소 5년 데이터
                     survivors["train"].append(stock)
 

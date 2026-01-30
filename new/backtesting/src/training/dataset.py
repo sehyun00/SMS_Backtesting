@@ -52,45 +52,18 @@ class FinancialDataset(Dataset):
         # Use simple sliding window on unique dates
         dates = sorted(self.df.index.unique())
 
-        for i in range(len(dates) - self.window_size):
+        for i in range(len(dates) - self.window_size - 1):
             window_dates = dates[i : i + self.window_size]
-            target_date = dates[i + self.window_size]  # Predict next step
+            next_window_dates = dates[i + 1 : i + 1 + self.window_size]
+            target_date = dates[i + self.window_size]  # Predict next step (label)
 
-            # Extract features for all stocks in this window
-            # Shape: [N, T, F]
-            # We need to ensure order of stocks is consistent (sorted symbols)
+            # 1. Current State (Features)
+            features_array = self._get_features_for_window(window_dates)
 
-            # Let's iterate symbols for safety first.
-            current_window_df = self.df.loc[window_dates]
+            # 2. Next State (Next Features for RL)
+            next_features_array = self._get_features_for_window(next_window_dates)
 
-            batch_features = []
-
-            for symbol in self.symbols:
-                stock_df = current_window_df[current_window_df["Symbol"] == symbol]
-
-                # Handle missing data (e.g. not listed yet)
-                if len(stock_df) < self.window_size:
-                    # Pad with zeros or skip?
-                    # ResearchCodeGuide suggests robustness.
-                    # Zero padding is safer for graph.
-                    pad_len = self.window_size - len(stock_df)
-                    vals = stock_df[self.features].values
-                    vals = np.pad(vals, ((pad_len, 0), (0, 0)), mode="constant")
-                    batch_features.append(vals)
-                else:
-                    batch_features.append(stock_df[self.features].values)
-
-            # [N, T, F]
-            features_array = np.array(batch_features)
-
-            # Robust Z-Score Normalization per Window
-            # Normalize each feature across (Nodes, Time)
-            # This handles scale disparity (e.g. Volume vs Price vs Factors)
-            mean = np.mean(features_array, axis=(0, 1), keepdims=True)
-            std = np.std(features_array, axis=(0, 1), keepdims=True)
-            features_array = (features_array - mean) / (std + 1e-8)
-
-            # Create Graph (Adjacency Matrix)
+            # 3. Create Graph (Adjacency Matrix)
             # Using last date of window for correlation/structure
             last_date = window_dates[-1]
             adj_matrix = self._create_adj_matrix(self.df.loc[str(last_date)])
@@ -113,6 +86,9 @@ class FinancialDataset(Dataset):
             windows.append(
                 {
                     "features": torch.FloatTensor(features_array),  # [N, T, F]
+                    "next_features": torch.FloatTensor(
+                        next_features_array
+                    ),  # [N, T, F]
                     "adj_matrix": torch.FloatTensor(adj_matrix),
                     "labels": torch.FloatTensor(labels_list),  # [N, 4]
                     "date": str(target_date),
@@ -120,6 +96,32 @@ class FinancialDataset(Dataset):
             )
 
         return windows
+
+    def _get_features_for_window(self, window_dates):
+        current_window_df = self.df.loc[window_dates]
+        batch_features = []
+
+        for symbol in self.symbols:
+            stock_df = current_window_df[current_window_df["Symbol"] == symbol]
+
+            # Handle missing data (e.g. not listed yet)
+            if len(stock_df) < self.window_size:
+                pad_len = self.window_size - len(stock_df)
+                vals = stock_df[self.features].values
+                vals = np.pad(vals, ((pad_len, 0), (0, 0)), mode="constant")
+                batch_features.append(vals)
+            else:
+                batch_features.append(stock_df[self.features].values)
+
+        # [N, T, F]
+        features_array = np.array(batch_features)
+
+        # Robust Z-Score Normalization per Window
+        mean = np.mean(features_array, axis=(0, 1), keepdims=True)
+        std = np.std(features_array, axis=(0, 1), keepdims=True)
+        features_array = (features_array - mean) / (std + 1e-8)
+
+        return features_array
 
     def _create_adj_matrix(self, snapshot_df: pd.DataFrame) -> np.ndarray:
         # Simple correlation based on Sector

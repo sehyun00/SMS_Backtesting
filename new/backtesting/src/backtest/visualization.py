@@ -97,6 +97,9 @@ class Visualizer:
             label = f"{name} (CAGR: {cagr:.1f}%)"
 
             ax1.plot(dates, returns, label=label, linewidth=2.5, color=color)
+            print(
+                f"      [Debug] {name} | Final Value: {values[-1]:.2f} | CAGR: {cagr:.2f}%"
+            )
             idx += 1
 
         ax1.set_title(

@@ -1,0 +1,88 @@
+2026-01-29 23:55:26,254 - INFO - Starting training for 800 epochs on cuda
+2026-01-29 23:55:36,788 - INFO - Epoch 0/800 | Loss: 0.482111
+2026-01-29 23:55:36,801 - INFO - Saved best model (Loss: 0.482111) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:55:47,192 - INFO - Saved best model (Loss: 0.312800) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:55:57,421 - INFO - Saved best model (Loss: 0.277644) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:56:07,788 - INFO - Saved best model (Loss: 0.261767) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:56:18,108 - INFO - Saved best model (Loss: 0.251594) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:56:28,743 - INFO - Saved best model (Loss: 0.243821) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:56:39,997 - INFO - Saved best model (Loss: 0.237154) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:56:50,696 - INFO - Saved best model (Loss: 0.232652) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:57:00,643 - INFO - Saved best model (Loss: 0.229237) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:57:11,120 - INFO - Saved best model (Loss: 0.227018) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:57:21,232 - INFO - Epoch 10/800 | Loss: 0.225439
+2026-01-29 23:57:21,242 - INFO - Saved best model (Loss: 0.225439) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:57:31,490 - INFO - Saved best model (Loss: 0.223232) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:57:41,937 - INFO - Saved best model (Loss: 0.221591) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:57:52,662 - INFO - Saved best model (Loss: 0.219896) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:58:03,090 - INFO - Saved best model (Loss: 0.218334) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:58:13,957 - INFO - Saved best model (Loss: 0.216906) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:58:24,446 - INFO - Saved best model (Loss: 0.215888) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:58:34,874 - INFO - Saved best model (Loss: 0.214788) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:58:45,370 - INFO - Saved best model (Loss: 0.213232) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:58:56,429 - INFO - Saved best model (Loss: 0.212367) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:59:07,130 - INFO - Epoch 20/800 | Loss: 0.211118
+2026-01-29 23:59:07,139 - INFO - Saved best model (Loss: 0.211118) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:59:17,634 - INFO - Saved best model (Loss: 0.210374) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:59:28,185 - INFO - Saved best model (Loss: 0.209669) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:59:38,943 - INFO - Saved best model (Loss: 0.209043) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:59:48,973 - INFO - Saved best model (Loss: 0.207842) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-29 23:59:59,266 - INFO - Saved best model (Loss: 0.207214) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:00:09,257 - INFO - Saved best model (Loss: 0.206600) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:00:20,376 - INFO - Saved best model (Loss: 0.206008) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:00:31,117 - INFO - Saved best model (Loss: 0.205781) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:00:41,694 - INFO - Saved best model (Loss: 0.205409) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:00:52,380 - INFO - Epoch 30/800 | Loss: 0.204527
+2026-01-30 00:00:52,389 - INFO - Saved best model (Loss: 0.204527) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:01:02,494 - INFO - Saved best model (Loss: 0.204026) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:01:12,388 - INFO - Saved best model (Loss: 0.203852) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:01:23,078 - INFO - Saved best model (Loss: 0.203654) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:01:34,338 - INFO - Saved best model (Loss: 0.203170) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:01:45,771 - INFO - Saved best model (Loss: 0.202838) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:01:56,115 - INFO - Saved best model (Loss: 0.202384) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:02:06,563 - INFO - Saved best model (Loss: 0.202316) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:02:16,884 - INFO - Saved best model (Loss: 0.202191) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:02:27,054 - INFO - Saved best model (Loss: 0.201510) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:02:37,304 - INFO - Epoch 40/800 | Loss: 0.201662
+2026-01-30 00:02:47,562 - INFO - Saved best model (Loss: 0.201189) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:02:57,903 - INFO - Saved best model (Loss: 0.201003) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:03:08,293 - INFO - Saved best model (Loss: 0.200795) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:03:18,531 - INFO - Saved best model (Loss: 0.200534) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:03:28,817 - INFO - Saved best model (Loss: 0.200392) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:03:39,171 - INFO - Saved best model (Loss: 0.200224) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:03:59,847 - INFO - Saved best model (Loss: 0.199837) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:04:10,192 - INFO - Saved best model (Loss: 0.199353) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:04:20,473 - INFO - Epoch 50/800 | Loss: 0.199002
+2026-01-30 00:04:20,482 - INFO - Saved best model (Loss: 0.199002) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:04:30,845 - INFO - Saved best model (Loss: 0.198926) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:04:41,073 - INFO - Saved best model (Loss: 0.198781) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:04:51,566 - INFO - Saved best model (Loss: 0.198656) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:05:01,974 - INFO - Saved best model (Loss: 0.198563) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:05:12,349 - INFO - Saved best model (Loss: 0.198440) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:05:22,830 - INFO - Saved best model (Loss: 0.198215) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:05:42,867 - INFO - Saved best model (Loss: 0.198177) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:05:52,732 - INFO - Saved best model (Loss: 0.197889) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:06:02,842 - INFO - Epoch 60/800 | Loss: 0.197359
+2026-01-30 00:06:02,851 - INFO - Saved best model (Loss: 0.197359) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:06:22,390 - INFO - Saved best model (Loss: 0.197236) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:06:32,945 - INFO - Saved best model (Loss: 0.197040) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:06:43,198 - INFO - Saved best model (Loss: 0.196998) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:07:03,915 - INFO - Saved best model (Loss: 0.196675) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:07:14,382 - INFO - Saved best model (Loss: 0.196310) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:07:45,293 - INFO - Epoch 70/800 | Loss: 0.196259
+2026-01-30 00:07:45,304 - INFO - Saved best model (Loss: 0.196259) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:07:55,558 - INFO - Saved best model (Loss: 0.195937) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:08:16,818 - INFO - Saved best model (Loss: 0.195820) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:08:36,912 - INFO - Saved best model (Loss: 0.195787) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:08:56,878 - INFO - Saved best model (Loss: 0.195474) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:09:29,565 - INFO - Epoch 80/800 | Loss: 0.195152
+2026-01-30 00:09:29,581 - INFO - Saved best model (Loss: 0.195152) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:10:02,033 - INFO - Saved best model (Loss: 0.195078) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:10:12,260 - INFO - Saved best model (Loss: 0.194776) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:10:22,191 - INFO - Saved best model (Loss: 0.194664) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:10:42,143 - INFO - Saved best model (Loss: 0.194537) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:10:52,451 - INFO - Saved best model (Loss: 0.194243) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:11:13,794 - INFO - Epoch 90/800 | Loss: 0.194351
+2026-01-30 00:11:33,746 - INFO - Saved best model (Loss: 0.194130) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:11:43,052 - INFO - Saved best model (Loss: 0.193927) to results\tgnn\checkpoints\best_model_20260129_235526.pth
+2026-01-30 00:11:52,507 - INFO - Saved best model (Loss: 0.193848) to results\tgnn\checkpoints\best_model_20260129_235526.pth

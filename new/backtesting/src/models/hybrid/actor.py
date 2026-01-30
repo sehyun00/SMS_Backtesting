@@ -3,77 +3,109 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple
 
-from .encoders import TGNNEncoder, DDPGEncoder
-from .heads import TGNNHead, DDPGHead, EnsembleHead
+from .encoders import TGNNEncoder
+from src.models.layers import (
+    SharedFactorEncoder,
+    ScoreHead,
+    GlobalPoolHead,
+    PortfolioSoftmax,
+)
 from .constraints import PortfolioConstraints
 
 
 class HybridActor(nn.Module):
     """
-    Hybrid Actor Network:
-    - TGNN Path: GCN + Temporal Attention -> Weights
-    - DDPG Path: MLP -> Weights
-    - Ensemble: Alpha * TGNN + (1-Alpha) * DDPG
+    Hybrid Actor Network (Asset-Agnostic):
+    - TGNN Path: GCN + Temporal Attention -> Score -> Weights
+    - DDPG Path: Shared Encoder -> Score -> Weights
+    - Ensemble: Global Pooling -> Alpha -> Mixing
     """
 
     def __init__(
         self,
-        num_stocks: int,
+        num_stocks: int,  # Kept for interface compatibility, but unused for sizing
         window_size: int,
         num_features: int,
         hidden_dim: int = 128,
+        temperature: float = 1.0,
     ):
         super().__init__()
-        self.num_stocks = num_stocks
+        # self.num_stocks = num_stocks # Removed dependency
 
-        # 1. TGNN Path
+        # 1. TGNN Path (Graph-based, naturally handles variable N)
         self.tgnn_encoder = TGNNEncoder(num_features, hidden_dim // 2)
 
-        # TGNN Head Input: N * (Hidden/2)
-        tgnn_flat_dim = num_stocks * (hidden_dim // 2)
-        self.tgnn_head = TGNNHead(tgnn_flat_dim, hidden_dim, num_stocks)
+        # TGNN Head: (Hidden/2) -> Score (Scalar)
+        # Shared weights across all stocks
+        self.tgnn_head = ScoreHead(hidden_dim // 2, hidden_dim)
 
-        # 2. DDPG Path
-        # State: Features (N*T*F) + Adj (N*N)
-        self.state_dim_features = num_stocks * window_size * num_features
-        self.state_dim_adj = num_stocks * num_stocks
-        total_state_dim = self.state_dim_features + self.state_dim_adj
+        # 2. DDPG Path (Asset-Agnostic)
+        # Shared Encoder: Features -> Hidden
+        self.ddpg_encoder = SharedFactorEncoder(num_features, hidden_dim)
 
-        self.ddpg_encoder = DDPGEncoder(total_state_dim, hidden_dim)
+        # DDPG Head: Hidden -> Score (Scalar)
+        self.ddpg_head = ScoreHead(hidden_dim, hidden_dim)
 
-        self.ddpg_head = DDPGHead(hidden_dim, hidden_dim, num_stocks)
+        # Softmax Layer with Temperature
+        self.softmax_layer = PortfolioSoftmax(temperature)
 
         # 3. Ensemble (Alpha)
-        # Input: State + TGNN_W + DDPG_W
-        ensemble_input_dim = total_state_dim + num_stocks * 2
-        self.ensemble_net = EnsembleHead(ensemble_input_dim)
+        # Input to Pooler:
+        #   Feature State (DDPG Enc: Hidden)
+        #   + TGNN Score (1)
+        #   + DDPG Score (1)
+        #   = Hidden + 2
+        ensemble_input_dim = hidden_dim + 2
 
-        # 4. Constraints
-        self.constraints = PortfolioConstraints(num_stocks)
+        # Global Pooling -> Scalar Alpha
+        self.ensemble_net = GlobalPoolHead(ensemble_input_dim, hidden_dim, output_dim=1)
+
+        # 4. Constraints (Stateless)
+        self.constraints = PortfolioConstraints()
 
     def forward(
         self, features: torch.Tensor, adj: torch.Tensor, current_mdd: float = 0.0
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            features: [Batch, N, T, F]
+            adj: [Batch, N, N]
+            current_mdd: float
+        """
         batch = features.shape[0]
+        N = features.shape[1]
 
         # --- TGNN Path ---
-        tgnn_emb = self.tgnn_encoder(features, adj)  # [B, N, H/2]
-        tgnn_flat = tgnn_emb.reshape(batch, -1)
-        tgnn_logits = self.tgnn_head(tgnn_flat)
-        tgnn_weights = F.softmax(tgnn_logits, dim=-1)
+        # Encoder: [B, N, T, F] -> [B, N, H/2]
+        tgnn_emb = self.tgnn_encoder(features, adj)
+        # Head: [B, N, H/2] -> [B, N, 1]
+        tgnn_scores = self.tgnn_head(tgnn_emb).squeeze(-1)  # [B, N]
+        tgnn_weights = self.softmax_layer(tgnn_scores)
 
         # --- DDPG Path ---
-        features_flat = features.reshape(batch, -1)
-        adj_flat = adj.reshape(batch, -1)
-        state_flat = torch.cat([features_flat, adj_flat], dim=-1)
+        # Flatten time: [B, N, T, F] -> [B, N, T*F]
+        if features.dim() == 4:
+            features_flat = features.reshape(batch, N, -1)
+        else:
+            features_flat = features
 
-        ddpg_feat = self.ddpg_encoder(state_flat)
-        ddpg_logits = self.ddpg_head(ddpg_feat)
-        ddpg_weights = F.softmax(ddpg_logits, dim=-1)
+        # Encoder: [B, N, T*F] -> [B, N, H]
+        ddpg_emb = self.ddpg_encoder(features_flat)
+        # Head: [B, N, H] -> [B, N, 1]
+        ddpg_scores = self.ddpg_head(ddpg_emb).squeeze(-1)  # [B, N]
+        ddpg_weights = self.softmax_layer(ddpg_scores)
 
         # --- Ensemble ---
-        ensemble_in = torch.cat([state_flat, tgnn_weights, ddpg_weights], dim=-1)
-        alpha = self.ensemble_net(ensemble_in)
+        # Combine State + Scores for Alpha calculation
+        # [B, N, H], [B, N, 1], [B, N, 1] -> [B, N, H+2]
+        ensemble_in = torch.cat(
+            [ddpg_emb, tgnn_scores.unsqueeze(-1), ddpg_scores.unsqueeze(-1)], dim=-1
+        )
+
+        # Global Pooling -> [B, 1] (Alpha)
+        raw_alpha = self.ensemble_net(ensemble_in)
+        alpha = torch.sigmoid(raw_alpha)  # Sigmoid for 0~1 range
+
         # alpha constraints (0.2 ~ 0.8)
         alpha = torch.clamp(alpha, 0.2, 0.8)
 
@@ -86,6 +118,7 @@ class HybridActor(nn.Module):
             self.constraints.min_weight = 0.00
 
         # Mixing
+        # [B, 1] * [B, N] + [B, 1] * [B, N] -> [B, N]
         final_weights = alpha * tgnn_weights + (1 - alpha) * ddpg_weights
 
         # --- Constraint Enforcement ---

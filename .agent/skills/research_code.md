@@ -50,6 +50,11 @@ description: new/backtesting 디렉토리 코드 작업(수정, 리팩토링, �
 - **평탄한 구조**: 깊은 중첩(예: `models/hybrid/actor/encoders.py`)은 피하세요. 패키지 내에서 평탄한 모듈 구조(예: `models/hybrid/encoders.py`)를 선호하세요.
 - **명확한 Import**: `__init__.py`를 사용하여 하위 모듈에서 더 깔끔한 API를 노출하세요.
 
+#### 규칙 3: 데이터 무결성 및 누수 방지 (No Data Leakage)
+- **테스트 데이터 학습 금지**: `Test Dataset`에 대해 `train()`, `fit()`, `finetune()`을 호출하는 것은 **Look-ahead Bias(미래 참조)**로 간주됩니다. 절대 금지합니다.
+- **Inference Only**: 백테스팅 단계에서는 오직 `Inference (predict)` 모드만 허용됩니다. 모델의 가중치를 업데이트하는 모든 행위는 훈련 단계(Training Phase)에서만 이루어져야 합니다.
+- **Transfer Learning 예외**: Domain Adaptation이 필요한 경우, 반드시 검증된 `Calibration Set`(과거 데이터)을 사용하여 수행해야 하며, 평가 대상인 `Test Set`을 사용해서는 안 됩니다.
+
 ## 5. 마이그레이션 규칙 (본 프로젝트 전용)
 -   코드를 `new/`로 이관할 때, **절대 복사-붙여넣기 하지 마세요.**
 -   위 표준을 준수하도록 **리팩토링하여 재작성**해야 합니다.

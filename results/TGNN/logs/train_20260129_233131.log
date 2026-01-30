@@ -1,0 +1,7 @@
+2026-01-29 23:31:31,107 - INFO - Starting Fine-tuning for 50 epochs (LR factor: 0.1)
+2026-01-29 23:31:33,444 - INFO - Finetune Epoch 0/50 | Loss: 0.166040
+2026-01-29 23:31:52,575 - INFO - Finetune Epoch 10/50 | Loss: 0.120825
+2026-01-29 23:32:11,223 - INFO - Finetune Epoch 20/50 | Loss: 0.117993
+2026-01-29 23:32:29,268 - INFO - Finetune Epoch 30/50 | Loss: 0.116245
+2026-01-29 23:32:47,556 - INFO - Finetune Epoch 40/50 | Loss: 0.115503
+2026-01-29 23:33:04,620 - INFO - Fine-tuning Complete. Best Loss: 0.109976

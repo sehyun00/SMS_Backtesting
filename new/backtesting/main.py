@@ -53,9 +53,9 @@ def main():
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["preprocess", "train", "backtest"],
+        choices=["preprocess", "train", "backtest", "full"],
         default="train",
-        help="Execution mode: 'preprocess', 'train', or 'backtest'.",
+        help="Execution mode: 'preprocess', 'train', 'backtest', or 'full' (Train + Backtest).",
     )
 
     parser.add_argument(
@@ -122,10 +122,98 @@ def main():
             Pipeline(csv_path=None).run(config)
 
     elif args.mode == "train":
-        run_train(config)
+        selected_model = config["project"].get("selected_model", "tgnn").lower()
+
+        if selected_model == "all":
+            models_to_run = ["tgnn", "ddpg", "hybrid"]
+            print(f"\n🚀 [ALL MODE] Starting Sequential Training for: {models_to_run}")
+
+            for model in models_to_run:
+                print(f"\n{'=' * 40}")
+                print(f"🔥 Starting Training for Model: {model.upper()}")
+                print(f"{'=' * 40}")
+
+                # Update config for current model
+                config["project"]["selected_model"] = model
+                try:
+                    run_train(config)
+                    print(f"✅ Finished Training {model.upper()}")
+                except Exception as e:
+                    print(f"❌ Error Training {model.upper()}: {e}")
+                    # Option: Continue to next model or stop? Let's continue.
+        else:
+            run_train(config)
 
     elif args.mode == "backtest":
-        run_backtest(config, model_path=args.model_path)
+        selected_model = config["project"].get("selected_model", "tgnn").lower()
+
+        if selected_model == "all":
+            models_to_run = ["tgnn", "ddpg", "hybrid"]
+            print(f"\n🚀 [ALL MODE] Starting Sequential Backtest for: {models_to_run}")
+
+            for model in models_to_run:
+                print(f"\n{'=' * 40}")
+                print(f"🧪 Starting Backtest for Model: {model.upper()}")
+                print(f"{'=' * 40}")
+
+                config["project"]["selected_model"] = model
+                try:
+                    # Clear model_path arg if it was specific to one model,
+                    # or handle it if user provided a dir.
+                    # For simplicity in 'all' mode, we usually rely on auto-loading best_model.
+                    # So we pass None to let pipeline find the best model for 'model'.
+                    run_backtest(config, model_path=None)
+                    print(f"✅ Finished Backtest {model.upper()}")
+                except Exception as e:
+                    print(f"❌ Error Backtesting {model.upper()}: {e}")
+        else:
+            run_backtest(config, model_path=args.model_path)
+
+    elif args.mode == "full":
+        selected_model = config["project"].get("selected_model", "tgnn").lower()
+
+        if selected_model == "all":
+            models_to_run = ["tgnn", "ddpg", "hybrid"]
+            print(
+                f"\n🚀 [FULL PIPELINE] Starting Train -> Backtest for: {models_to_run}"
+            )
+
+            for model in models_to_run:
+                print(f"\n{'=' * 60}")
+                print(f"🔄 Processing Model: {model.upper()} (Train + Backtest)")
+                print(f"{'=' * 60}")
+
+                config["project"]["selected_model"] = model
+
+                # 1. Train
+                try:
+                    print(f"\n🔥 [Step 1/2] Training {model.upper()}...")
+                    run_train(config)
+                except Exception as e:
+                    print(f"❌ Training Failed for {model.upper()}: {e}")
+                    continue  # Skip backtest if train fails
+
+                # 2. Backtest
+                try:
+                    print(f"\n🧪 [Step 2/2] Backtesting {model.upper()}...")
+                    run_backtest(
+                        config, model_path=None
+                    )  # Auto-load just-trained model
+                    print(f"✅ {model.upper()} Pipeline Completed!")
+                except Exception as e:
+                    print(f"❌ Backtest Failed for {model.upper()}: {e}")
+
+        else:
+            # Single model full pipeline
+            print(
+                f"\n🚀 [FULL PIPELINE] Starting Train -> Backtest for: {selected_model}"
+            )
+
+            # 1. Train
+            run_train(config)
+
+            # 2. Backtest
+            run_backtest(config, model_path=None)
 
 
 if __name__ == "__main__":
