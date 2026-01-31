@@ -4,10 +4,17 @@ from typing import Dict, List, Union
 
 
 def compute_metrics(
-    portfolio_values: Union[List[float], np.ndarray], initial_capital: float = 1_000_000
+    portfolio_values: Union[List[float], np.ndarray],
+    initial_capital: float = 1_000_000,
+    risk_free_rate: float = 0.02,  # 연간 무위험수익률 (기본 2%)
 ) -> Dict[str, float]:
     """
     Computes financial metrics (Return, CAGR, MDD, Sharpe) from portfolio history.
+
+    Args:
+        portfolio_values: 포트폴리오 가치 시계열
+        initial_capital: 초기 자본
+        risk_free_rate: 연간 무위험수익률 (기본 2%)
     """
     values = np.array(portfolio_values)
     if len(values) == 0:
@@ -29,11 +36,12 @@ def compute_metrics(
     drawdown = (values - running_max) / running_max
     mdd = abs(np.min(drawdown))
 
-    # Sharpe (Daily assumption: 252)
+    # Sharpe Ratio (무위험수익률 반영)
     pct_change = pd.Series(values).pct_change().dropna()
     if len(pct_change) > 0:
         vol = pct_change.std() * np.sqrt(252)
-        sharpe = (cagr) / (vol + 1e-8)
+        excess_return = cagr - risk_free_rate  # 초과수익률 = CAGR - RF
+        sharpe = excess_return / (vol + 1e-8)
     else:
         sharpe = 0
 

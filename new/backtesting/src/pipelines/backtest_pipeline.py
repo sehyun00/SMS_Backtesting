@@ -216,21 +216,23 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
     if hasattr(model, "heads"):
         # 2. TGNN Rebalancing Strategies (Horizon Matching)
         print(f"\n[Model: TGNN Rebalancing Strategies (Horizon Matching)]")
-        # Map: Frequency Name -> (Interval, Target Head)
+        # Map: Frequency Name -> Target Head
         horizon_map = {
-            "Monthly": (21, "Momentum1M"),
-            "Quarterly": (63, "Momentum3M"),
-            "Semiannual": (126, "Momentum6M"),
-            "Annual": (252, "Momentum12M"),
+            "monthly": "Momentum1M",
+            "quarterly": "Momentum3M",
+            "semiannual": "Momentum6M",
+            "annual": "Momentum12M",
         }
 
-        for freq_name, (interval, target_head) in horizon_map.items():
-            run_name = f"TGNN_{freq_name}"
-            print(f"\n[Strategy: {freq_name} Rebalancing | Head: {target_head}]")
+        for freq_name, target_head in horizon_map.items():
+            run_name = f"TGNN_{freq_name.capitalize()}"
+            print(
+                f"\n[Strategy: {freq_name.capitalize()} Rebalancing | Head: {target_head}]"
+            )
             results[run_name] = backtester.run_strategy(
                 strategy_type="model",
                 target_head=target_head,
-                rebalance_interval=interval,
+                rebalance_freq=freq_name,
             )
 
     else:
@@ -238,21 +240,15 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
         # Iterate over Rebalancing Frequencies
         print(f"\n[Model: {model_type.upper()} Rebalancing Strategies]")
 
-        # Approximate Trading Days
-        rebalance_map = {
-            "Monthly": 21,
-            "Quarterly": 63,
-            "Semiannual": 126,
-            "Annual": 252,
-        }
+        rebalance_freqs = ["monthly", "quarterly", "semiannual", "annual"]
 
-        for freq_name, interval in rebalance_map.items():
-            run_name = f"{model_type.upper()}_{freq_name}"
-            print(f"\n[Strategy: {freq_name} Rebalancing]")
+        for freq_name in rebalance_freqs:
+            run_name = f"{model_type.upper()}_{freq_name.capitalize()}"
+            print(f"\n[Strategy: {freq_name.capitalize()} Rebalancing]")
             results[run_name] = backtester.run_strategy(
                 strategy_type="model",
                 target_head="Portfolio",
-                rebalance_interval=interval,
+                rebalance_freq=freq_name,
             )
 
     # Visualization and Logging

@@ -16,7 +16,7 @@ data:
   predict_window: 1
   stock_universes: [] # Empty list = Use ALL stocks found in data (approx 55)
   features: ["Open", "High", "Low", "Close", "Volume"] 
-  # 5-Factor Data will be added during preprocessing
+  # Fama-French 5-Factor (Mkt_RF, SMB, HML, RMW, CMA) 사용
   factors:
     weights:
       value: 0.3
@@ -25,7 +25,7 @@ data:
       beta: 0.2
 
 model:
-  softmax_temperature: 2 # Global: Controls Portfolio Diversification (>1.0: Diverse, <1.0: Concentrated)
+  softmax_temperature: 10 # Global: Controls Portfolio Diversification (>1.0: Diverse, <1.0: Concentrated)
   tgnn:
     hidden_dim: 64
     num_heads: 4

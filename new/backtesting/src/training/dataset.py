@@ -30,12 +30,13 @@ class FinancialDataset(Dataset):
         self.features = list(config["data"]["features"])
 
         if "factors" in config["data"]:
-            # Add factor columns if they exist in df
+            # Fama-French 5-Factor 컬럼 사용
             factor_cols = [
-                "Beta_Factor",
-                "Value_Factor",
-                "Momentum_Factor",
-                "Volatility_Factor",
+                "Mkt_RF",  # 시장 초과수익률
+                "SMB",  # Size (규모 효과)
+                "HML",  # Value (가치 효과)
+                "RMW",  # Profitability (수익성)
+                "CMA",  # Investment (투자 보수성)
             ]
             self.features += factor_cols
 

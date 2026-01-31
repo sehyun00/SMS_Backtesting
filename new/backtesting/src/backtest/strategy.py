@@ -32,7 +32,14 @@ class StrategyHandler:
         self, model, window: Dict[str, Any], target_head: str
     ) -> np.ndarray:
         """
-        Executes model inference and applies weighting logic (Top-K / Softmax).
+        Executes model inference and applies weighting logic.
+
+        [모델별 출력 형식 차이]
+        - DDPG/Hybrid: Actor가 이미 Softmax 적용된 weights 반환 → 그대로 사용
+        - TGNN: Raw scores 반환 → _calculate_softmax_weights()로 변환 필요
+
+        Returns:
+            np.ndarray: 포트폴리오 비중 (sum ≈ 1.0)
         """
         # 1. Prepare Input
         features = torch.FloatTensor(window["features"]).to(self.device)

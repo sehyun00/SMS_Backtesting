@@ -1,14 +1,16 @@
 import pandas as pd
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from .indicators import TechnicalIndicators
-from .factors import FactorCalculator
 from .fama_french_loader import FamaFrenchLoader
 
 
 class DataProcessor:
     """
     Processes raw stock data into 5-Factor model data.
-    Acts as a Facade for Indicators, Factors, and External Data.
+    Acts as a Facade for Indicators and External Fama-French Data.
+
+    [주의] Fama-French 5-Factor는 외부 데이터에서 로드합니다.
+    자체 팩터 계산(레거시 FactorCalculator)은 제거되었습니다.
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -16,7 +18,6 @@ class DataProcessor:
         Initialize DataProcessor with configuration.
         """
         self.config = config
-        self.factor_weights = config["data"]["factors"]["weights"]
         self.ff_loader = FamaFrenchLoader()
 
     def add_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -25,29 +26,10 @@ class DataProcessor:
         """
         return TechnicalIndicators.add_all_indicators(df)
 
-    def calculate_factors(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Calculates 5-Factor scores using FactorCalculator module.
-        """
-        return FactorCalculator.calculate_factors(df)
-
-    def calculate_weighted_score(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Calculates specific weighted score using FactorCalculator module.
-        """
-        # Map config keys to FactorCalculator expectations if needed
-        # FactorCalculator expects specific logic, passing config weights
-        weights = {
-            "Value_Factor": self.factor_weights.get("value", 0.3),
-            "Momentum_Factor": self.factor_weights.get("momentum", 0.3),
-            "Volatility_Factor": self.factor_weights.get("volatility", 0.2),
-            "Beta_Factor": self.factor_weights.get("beta", 0.2),
-        }
-        return FactorCalculator.calculate_weighted_score(df, custom_weights=weights)
-
     def merge_fama_french_factors(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Downloads and merges Fama-French 5 Factors.
+        Fama-French 컬럼: Mkt_RF, SMB, HML, RMW, CMA, RF
         """
         # Download if not already valid
         if self.ff_loader.ff_data is None:

@@ -1,8 +1,7 @@
 import numpy as np
 import pandas as pd
-import torch
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from .strategy import StrategyHandler
 from .visualization import Visualizer
@@ -92,18 +91,53 @@ class Backtester:
         daily_returns.fillna(0.0, inplace=True)
         return daily_returns
 
+    def _should_rebalance(
+        self, current_date: pd.Timestamp, prev_date: pd.Timestamp, interval_type: str
+    ) -> bool:
+        """
+        날짜 기반 리밸런싱 판단.
+
+        Args:
+            current_date: 현재 거래일
+            prev_date: 이전 거래일
+            interval_type: "daily", "monthly", "quarterly", "semiannual", "annual"
+
+        Returns:
+            True if rebalancing should occur
+        """
+        if prev_date is None:
+            return True  # 첫 거래일은 항상 리밸런싱
+
+        if interval_type == "daily":
+            return True
+        elif interval_type == "monthly":
+            return current_date.month != prev_date.month
+        elif interval_type == "quarterly":
+            return (current_date.month - 1) // 3 != (prev_date.month - 1) // 3
+        elif interval_type == "semiannual":
+            return (current_date.month - 1) // 6 != (prev_date.month - 1) // 6
+        elif interval_type == "annual":
+            return current_date.year != prev_date.year
+        else:
+            # Fallback: treat as daily
+            return True
+
     def run_strategy(
         self,
         strategy_type: str = "model",
         target_head: str = "Momentum1M",
-        rebalance_interval: int = 1,
+        rebalance_freq: str = "monthly",
     ) -> Dict[str, Any]:
         """
-        Runs strategy with specified rebalancing interval (in trading days).
-        Default is 1 (Daily Rebalancing).
+        Runs strategy with specified rebalancing frequency.
+
+        Args:
+            strategy_type: "buy_and_hold" or "model"
+            target_head: TGNN head name (e.g., "Momentum1M")
+            rebalance_freq: "daily", "monthly", "quarterly", "semiannual", "annual"
         """
         print(
-            f"\n🔄 Running Strategy: {strategy_type.upper()} ({target_head}) | Interval: {rebalance_interval}d"
+            f"\n🔄 Running Strategy: {strategy_type.upper()} ({target_head}) | Freq: {rebalance_freq}"
         )
 
         capital = self.initial_capital
@@ -114,18 +148,23 @@ class Backtester:
         # Initial Weights
         current_weights = np.ones(self.n_stocks) / self.n_stocks
 
-        # Apply initial mask if exists
-        if self.valid_mask is not None:
+        # Apply initial mask if exists (only for model strategies, not buy_and_hold)
+        if strategy_type != "buy_and_hold" and self.valid_mask is not None:
             current_weights = current_weights * self.valid_mask
             current_weights /= np.sum(current_weights) + 1e-8
 
-        for i, window in enumerate(self.test_windows):
-            target_date = window["date"]
+        prev_date = None  # 날짜 기반 리밸런싱을 위한 이전 날짜 추적
 
-            # 1. Update Weights (Rebalance)
-            # Only rebalance if interval is met OR it's the first step
+        for i, window in enumerate(self.test_windows):
+            target_date = pd.Timestamp(window["date"])
+
+            # 1. Update Weights (Rebalance) - 날짜 기반 판단
             trade_type = "Hold"
-            if i % rebalance_interval == 0:
+            should_rebalance = self._should_rebalance(
+                target_date, prev_date, rebalance_freq
+            )
+
+            if should_rebalance:
                 trade_type = "Rebalance"
                 try:
                     prev_weights = current_weights.copy()
@@ -133,8 +172,8 @@ class Backtester:
                         strategy_type, self.model, window, target_head
                     )
 
-                    # Apply Subset Masking (Zero out missing stocks)
-                    if self.valid_mask is not None:
+                    # Apply Subset Masking (Zero out missing stocks) - only for model strategies
+                    if strategy_type != "buy_and_hold" and self.valid_mask is not None:
                         current_weights = current_weights * self.valid_mask
 
                     # Force Normalize to prevent Cash Drag (Model might output sum < 1.0 due to float prec)
@@ -204,8 +243,12 @@ class Backtester:
             if (1 + port_ret) != 0:
                 current_weights = current_weights * (1 + daily_returns) / (1 + port_ret)
 
-            # Normalize just in case of float drift
-            current_weights /= np.sum(current_weights)
+            # Buy&Hold는 드리프트 그대로 유지,  model 전략은 재정규화
+            if strategy_type != "buy_and_hold":
+                current_weights /= np.sum(current_weights)
+
+            # 날짜 기반 리밸런싱을 위한 이전 날짜 업데이트
+            prev_date = target_date
 
         return {
             "dates": dates,

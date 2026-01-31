@@ -1,4 +1,12 @@
+---
+purpose: 학습 관련 모듈 (Dataset, Trainer, RL Environment)
+factors: Fama-French 5-Factor (Mkt_RF, SMB, HML, RMW, CMA)
+---
+
 # Training Module (모델 학습)
+
+> ℹ️ **팩터 정보**: 본 모듈은 **Fama-French 5-Factor**를 사용합니다.
+> 컬럼명: `Mkt_RF`, `SMB`, `HML`, `RMW`, `CMA`
 
 `src/training`은 데이터셋 생성, 학습 루프 실행, 그리고 강화학습(RL) 환경을 제공하는 모듈입니다.
 학술 연구의 표준을 따르기 위해 **지도 학습(Supervised)**과 **강화 학습(RL)** 파이프라인이 분리되어 있으며, **전이 학습(Transfer Learning)**을 위한 전용 메서드를 지원합니다.
