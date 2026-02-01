@@ -76,6 +76,8 @@ class Backtester:
         print("      [Init] Pre-calculating Daily Returns...")
         # Create empty DF with all unique dates
         dates = self.dataset.df.index.unique().sort_values()
+        # 명시적으로 Timestamp로 변환 (target_date와 타입 일치 보장)
+        dates = pd.to_datetime(dates)
         daily_returns = pd.DataFrame(index=dates)
 
         for sym in self.symbols:
@@ -84,7 +86,10 @@ class Backtester:
             if "Close" in sym_df.columns:
                 # Calculate pct_change properly
                 # Note: pct_change on filtered DF preserves index (Date)
-                daily_returns[sym] = sym_df["Close"].pct_change()
+                returns = sym_df["Close"].pct_change()
+                # 인덱스도 Timestamp로 통일
+                returns.index = pd.to_datetime(returns.index)
+                daily_returns[sym] = returns
             else:
                 daily_returns[sym] = 0.0
 
@@ -168,8 +173,18 @@ class Backtester:
                 trade_type = "Rebalance"
                 try:
                     prev_weights = current_weights.copy()
+
+                    # 리밸런싱 주기를 horizon 정수로 변환 (동적 Alpha용)
+                    horizon_map = {
+                        "monthly": 0,
+                        "quarterly": 1,
+                        "semiannual": 2,
+                        "annual": 3,
+                    }
+                    horizon = horizon_map.get(rebalance_freq, 0)
+
                     current_weights = self.strategy_handler.get_weights(
-                        strategy_type, self.model, window, target_head
+                        strategy_type, self.model, window, target_head, horizon=horizon
                     )
 
                     # Apply Subset Masking (Zero out missing stocks) - only for model strategies

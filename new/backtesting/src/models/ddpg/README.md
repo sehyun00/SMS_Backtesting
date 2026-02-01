@@ -65,8 +65,10 @@ model:
     critic_lr: 0.001    # Critic Learning Rate
     gamma: 0.99         # Discount Factor
     tau: 0.001          # Soft Update Ratio
-    buffer_size: 10000  # Replay Buffer Capacity
     batch_size: 64      # Mini-batch Size
+
+training:
+  buffer_size: 10000    # Replay Buffer Capacity
 ```
 
 ## 5. 재현성 (Reproducibility)

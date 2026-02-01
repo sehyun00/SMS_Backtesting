@@ -67,17 +67,22 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
     # 3. Determine Universe to use for Dataset Creation
     # If User specified a universe in config, prioritize that (Test Subset)
     # If User left it empty, they might want to test on EVERYTHING in test_data.csv
-    # OR they might want to match Training Universe.
-    # Logic: If empty, default to trained_universe (Consistency). If populated, use it (Transfer/Subset).
+    # test_data에서 실제 종목 추론 (Asset-Agnostic 모델에서 항상 사용)
+    inferred = set(test_df["Symbol"].unique()) if test_df is not None else set()
 
     if user_test_universe and len(user_test_universe) > 0:
-        print(
-            f"      User requested specific Test Universe: {len(user_test_universe)} symbols."
-        )
-        config["data"]["stock_universes"] = user_test_universe
+        print(f"      User specified Test Universe: {len(user_test_universe)} symbols.")
+        # user_test_universe와 test_data의 교집합 확인
+        valid_user = set(user_test_universe) & inferred
+        if len(valid_user) < len(user_test_universe):
+            print(
+                f"      ⚠️ Only {len(valid_user)} of {len(user_test_universe)} symbols exist in test_data."
+            )
+            inferred = valid_user if valid_user else inferred
+        else:
+            inferred = set(user_test_universe)
     elif test_df is not None and not test_df.empty:
         # Detect Intersection (Valid Test vs Trained)
-        inferred = set(test_df["Symbol"].unique())
         trained = set(trained_universe) if trained_universe else set()
 
         valid_subset = sorted(list(inferred & trained))
@@ -98,22 +103,13 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
             config["data"]["test_valid_subset"] = valid_subset
 
     if trained_universe and len(trained_universe) > 0:
-        # Check if Model is Asset-Agnostic (DDPG, Hybrid)
-        if model_type in ["ddpg", "hybrid"]:
-            print(
-                f"      ℹ️ Model ({model_type}) is Asset-Agnostic. Using Test Data Universe ({len(inferred)} symbols) instead of Training Universe."
-            )
-            # Use Inferred Test Universe
-            config["data"]["stock_universes"] = sorted(list(inferred))
-        else:
-            # TGNN (Graph Fixed): Default to Training Universe to maintain Graph Structure
-            print(
-                f"      No specific test universe in config. Defaulting to Training Universe ({len(trained_universe)} symbols)."
-            )
-            config["data"]["stock_universes"] = trained_universe
-    else:
-        # Fallback to whatever is in CSV
-        pass
+        # 모든 모델을 Asset-Agnostic으로 처리 (Transfer Learning 지원)
+        # TGNN도 인코더만 재사용하고 test_data 종목에 맞게 동작
+        print(
+            f"      ℹ️ Model ({model_type}) is Asset-Agnostic. Using Test Data Universe ({len(inferred)} symbols) instead of Training Universe."
+        )
+        # Use Inferred Test Universe
+        config["data"]["stock_universes"] = sorted(list(inferred))
 
     # For Dataset creation, we pass the Test DF
     # The dataset class will filter strictly if config has stock_universes
@@ -258,7 +254,10 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
     # 1. Save Trade Logs (Aggregated)
     backtester.visualizer.save_logs(results, dataset.symbols)
 
-    # 2. Plot Comparison
+    # 2. Save Metrics CSV (for generate_comparison_chart.py)
+    backtester.visualizer.save_metrics(results)
+
+    # 3. Plot Comparison
     # Visualizer knows the results_dir from backtester init
     backtester.visualizer.plot_comparison(results)
 

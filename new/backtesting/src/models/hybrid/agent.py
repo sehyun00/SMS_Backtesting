@@ -1,32 +1,39 @@
+"""
+HybridAgent - Composition Based DDPG + TGNN Ensemble
+
+기존 독립 구현에서 DDPG와 TGNN 인스턴스를 조합하는 방식으로 변경.
+이를 통해 코드 중복 제거 및 공정한 Ablation Study 가능.
+"""
+
 import torch
+import torch.nn as nn
 import numpy as np
 import torch.optim as optim
 from typing import Dict, Any, Tuple
+
 from src.models.base_model import BaseModel
-from .actor import HybridActor
-from .critic import HybridCritic
-from src.training.replay_buffer import ReplayBuffer
+from src.models.ddpg.agent import DDPGAgent
+from src.models.tgnn.model import TGNN
+from src.models.layers import GlobalPoolHead
 
 
 class HybridAgent(BaseModel):
     """
-    Hybrid TGNN-DDPG Agent (Asset-Agnostic).
-    Wraps Actor and Critic.
+    Hybrid TGNN-DDPG Agent (Composition Based).
+
+    구조:
+    - self.ddpg: DDPGAgent 인스턴스 (Actor-Critic)
+    - self.tgnn: TGNN 인스턴스 (Multi-Head Predictor)
+    - self.ensemble_net: 앙상블 alpha 학습 네트워크
+
+    출력:
+    - final_weights = alpha * tgnn_weights + (1-alpha) * ddpg_weights
     """
 
     def __init__(self, config: Dict[str, Any]):
-        super().__init__()
+        super().__init__(config)  # BaseModel에 config 전달
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.num_features = len(config["data"]["features"])
-        if "factors" in config["data"]:
-            self.num_features += len(config["data"]["factors"]["weights"])
-
-        # Note: num_stocks is derived from config for context,
-        # but the underlying Actor/Critic are Asset-Agnostic (Dynamic N).
-        self.num_stocks = len(config["data"]["stock_universes"])
-        self.window_size = config["data"]["window_size"]
 
         # Hyperparameters
         self.gamma = config["training"].get("gamma", 0.99)
@@ -36,57 +43,152 @@ class HybridAgent(BaseModel):
         self.batch_size = config["training"].get("batch_size", 64)
         self.temperature = config["model"].get("softmax_temperature", 1.0)
 
-        # Initialize Actor & Critic
-        self.actor = HybridActor(
-            self.num_stocks,
-            self.window_size,
-            self.num_features,
-            temperature=self.temperature,
-        )
-        self.critic = HybridCritic(self.num_features, self.window_size, hidden_dim=128)
+        # Alpha 제약 (config에서 읽기)
+        self.alpha_min = config["model"].get("hybrid_alpha_min", 0.2)
+        self.alpha_max = config["model"].get("hybrid_alpha_max", 0.8)
+        self.alpha_mode = config["model"].get(
+            "hybrid_alpha_mode", "fixed"
+        )  # "fixed" or "dynamic"
+        self.horizon_dim = config["model"].get("hybrid_horizon_dim", 8)
 
-        # Target Networks (Copy)
-        self.actor_target = HybridActor(
-            self.num_stocks,
-            self.window_size,
-            self.num_features,
-            temperature=self.temperature,
-        )
-        self.actor_target.load_state_dict(self.actor.state_dict())
+        # ============================================================
+        # Composition: DDPG와 TGNN 인스턴스 사용
+        # ============================================================
+        self.ddpg = DDPGAgent(config)
+        self.tgnn = TGNN(config)
 
-        self.critic_target = HybridCritic(
-            self.num_features, self.window_size, hidden_dim=128
+        # 리밸런싱 주기 임베딩 (동적 Alpha용)
+        # 0: monthly, 1: quarterly, 2: semiannual, 3: annual
+        self.horizon_embedding = nn.Embedding(4, self.horizon_dim)
+
+        # 앙상블 레이어: Global Pooling으로 alpha 계산
+        # Input: DDPG hidden (64) + TGNN embedding (64) + scores (2) + horizon (8) = 138
+        hidden_dim = 128
+        tgnn_emb_dim = 64  # TGNN의 마지막 hidden_dim
+        ddpg_emb_dim = 64  # DDPG encoder 출력
+        if self.alpha_mode == "dynamic":
+            ensemble_input_dim = tgnn_emb_dim + ddpg_emb_dim + 2 + self.horizon_dim
+        else:
+            ensemble_input_dim = tgnn_emb_dim + ddpg_emb_dim + 2  # +2 for scores
+
+        self.ensemble_net = GlobalPoolHead(
+            input_dim=ensemble_input_dim, hidden_dim=hidden_dim, output_dim=1
         )
-        self.critic_target.load_state_dict(self.critic.state_dict())
+
+        # Ensemble optimizer (ensemble_net + horizon_embedding 함께 학습)
+        ensemble_params = list(self.ensemble_net.parameters()) + list(
+            self.horizon_embedding.parameters()
+        )
+        self.ensemble_optimizer = optim.Adam(ensemble_params, lr=self.lr_actor)
+
+        # Replay Buffer는 DDPG의 buffer를 사용 (Composition 일관성)
+        # self.buffer property로 접근
 
         self.to(self.device)
-        self.actor_target.to(self.device)
-        self.critic_target.to(self.device)
 
-        # Optimizers
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr_actor)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr_critic)
+    @property
+    def buffer(self):
+        """DDPG Buffer에 대한 접근자 (학습 시 Trainer와 일치)"""
+        return self.ddpg.buffer
 
-        # Replay Buffer
-        self.buffer = ReplayBuffer(capacity=10000)
+    @property
+    def actor(self):
+        """DDPG Actor에 대한 접근자 (백테스팅 호환)"""
+        return self.ddpg.actor
 
-    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        adj: torch.Tensor,
+        target_head: str = "Momentum1M",
+        horizon: int = 0,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass for prediction/inference.
-        Returns portfolio weights.
+
+        Args:
+            x: [Batch, N, T, F]
+            adj: [Batch, N, N]
+            target_head: TGNN 예측 헤드 (default: Momentum1M)
+            horizon: 리밸런싱 주기 (0=monthly, 1=quarterly, 2=semiannual, 3=annual)
+
+        Returns:
+            final_weights: [Batch, N] 앙상블된 포트폴리오 비중
+            alpha: [Batch, 1] TGNN 비중
         """
-        weights, _ = self.actor(x, adj)
-        return weights
+        batch = x.shape[0]
+        N = x.shape[1]
+
+        # --- DDPG Path ---
+        ddpg_weights, _ = self.ddpg.actor(x)  # [Batch, N]
+
+        # DDPG 중간 임베딩 가져오기 (encoder 출력)
+        if x.dim() == 4:
+            x_flat = x.reshape(batch, N, -1)
+        else:
+            x_flat = x
+        ddpg_emb = self.ddpg.actor.encoder(x_flat)  # [Batch, N, 64]
+
+        # --- TGNN Path ---
+        tgnn_weights, tgnn_emb = self.tgnn.get_portfolio_weights(
+            x.to(self.tgnn.device),
+            adj.to(self.tgnn.device),
+            target_head=target_head,
+            temperature=self.temperature,
+        )  # [Batch, N], [Batch, N, 64]
+
+        # --- Ensemble ---
+        if self.alpha_mode == "dynamic":
+            # 동적 Alpha: horizon 임베딩 추가
+            horizon_tensor = torch.tensor([horizon], device=self.device)
+            horizon_emb = self.horizon_embedding(horizon_tensor)  # [1, horizon_dim]
+            # horizon_emb를 [Batch, N, horizon_dim]으로 확장
+            horizon_emb = horizon_emb.unsqueeze(0).expand(batch, N, -1)
+
+            ensemble_in = torch.cat(
+                [
+                    ddpg_emb,
+                    tgnn_emb,
+                    ddpg_weights.unsqueeze(-1),
+                    tgnn_weights.unsqueeze(-1),
+                    horizon_emb,
+                ],
+                dim=-1,
+            )  # [Batch, N, 64+64+2+horizon_dim]
+        else:
+            # 고정 Alpha: 기존 로직
+            ensemble_in = torch.cat(
+                [
+                    ddpg_emb,
+                    tgnn_emb,
+                    ddpg_weights.unsqueeze(-1),
+                    tgnn_weights.unsqueeze(-1),
+                ],
+                dim=-1,
+            )  # [Batch, N, 64+64+2]
+
+        # Global Pooling -> Alpha
+        raw_alpha = self.ensemble_net(ensemble_in)  # [Batch, 1]
+        alpha = torch.sigmoid(raw_alpha)
+        alpha = torch.clamp(alpha, self.alpha_min, self.alpha_max)
+
+        # Mixing
+        final_weights = alpha * tgnn_weights + (1 - alpha) * ddpg_weights
+
+        # 최종 정규화
+        final_weights = final_weights / (final_weights.sum(dim=-1, keepdim=True) + 1e-8)
+
+        return final_weights, alpha
 
     def predict(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
         """
         Prediction helper for evaluation.
         """
-        self.actor.eval()
+        self.eval()
         with torch.no_grad():
             x = batch["features"].to(self.device)
             adj = batch["adj_matrix"].to(self.device)
-            weights, _ = self.actor(x, adj)
+            weights, _ = self.forward(x, adj)
         return weights.cpu()
 
     def select_action(
@@ -95,17 +197,13 @@ class HybridAgent(BaseModel):
         """
         Select action with Dirichlet noise for exploration.
         """
-        self.actor.eval()
+        self.eval()
         with torch.no_grad():
-            feat_tensor = (
-                torch.FloatTensor(state_feat).unsqueeze(0).to(self.device)
-            )  # [1, N, T, F]
-            adj_tensor = (
-                torch.FloatTensor(state_adj).unsqueeze(0).to(self.device)
-            )  # [1, N, N]
+            feat_tensor = torch.FloatTensor(state_feat).unsqueeze(0).to(self.device)
+            adj_tensor = torch.FloatTensor(state_adj).unsqueeze(0).to(self.device)
 
-            weights, _ = self.actor(feat_tensor, adj_tensor)
-            action = weights.cpu().numpy()[0]  # [N]
+            weights, _ = self.forward(feat_tensor, adj_tensor)
+            action = weights.cpu().numpy()[0]
 
         if noise_std > 0:
             concentration = action / (noise_std + 1e-8)
@@ -113,3 +211,60 @@ class HybridAgent(BaseModel):
             action = np.random.dirichlet(concentration)
 
         return action
+
+    def update(self):
+        """
+        Perform one step of Actor-Critic update using Replay Buffer.
+        1. DDPG 업데이트 (Actor + Critic)
+        2. Ensemble 네트워크 업데이트 (alpha 학습)
+        """
+        # DDPG 업데이트
+        ddpg_result = self.ddpg.update()
+
+        if ddpg_result is None:
+            return None
+
+        # ============================================================
+        # Ensemble 네트워크 업데이트 (alpha 학습)
+        # 목표: 높은 Q-value를 받는 포트폴리오 비중을 학습
+        # ============================================================
+        if len(self.buffer) < self.batch_size:
+            return ddpg_result
+
+        # Sample Batch (DDPG와 동일한 버퍼 사용)
+        states, _, _, _, _ = self.buffer.sample(self.batch_size)
+        states = torch.FloatTensor(states).to(self.device)  # [B, N, T, F]
+
+        # Adjacency Matrix 생성 (완전 연결 그래프)
+        batch_size = states.shape[0]
+        N = states.shape[1]
+        adj = torch.ones(batch_size, N, N).to(self.device)
+
+        # Hybrid Forward (alpha 계산 포함)
+        self.train()
+        final_weights, alpha = self.forward(states, adj)
+
+        # DDPG Critic을 사용하여 Q-value 계산
+        # 목표: Q-value를 최대화하는 alpha 학습
+        q_value = self.ddpg.critic(states, final_weights)
+
+        # Ensemble Loss: -Q (maximize Q)
+        ensemble_loss = -q_value.mean()
+
+        # Alpha 정규화: 극단적인 값 방지 (0.5 근처로 유도)
+        alpha_reg = 0.01 * ((alpha - 0.5) ** 2).mean()
+        total_ensemble_loss = ensemble_loss + alpha_reg
+
+        # Optimizer Step
+        self.ensemble_optimizer.zero_grad()
+        total_ensemble_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.ensemble_net.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(self.horizon_embedding.parameters(), 1.0)
+        self.ensemble_optimizer.step()
+
+        return {
+            "critic_loss": ddpg_result["critic_loss"],
+            "actor_loss": ddpg_result["actor_loss"],
+            "ensemble_loss": total_ensemble_loss.item(),
+            "alpha_mean": alpha.mean().item(),
+        }

@@ -1,6 +1,7 @@
 import sys
 import os
 import yaml
+import copy
 import argparse
 
 # Path setup to ensure imports work
@@ -53,9 +54,9 @@ def main():
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["preprocess", "train", "backtest", "full"],
+        choices=["preprocess", "train", "backtest", "full", "compare"],
         default="train",
-        help="Execution mode: 'preprocess', 'train', 'backtest', or 'full' (Train + Backtest).",
+        help="Execution mode: 'preprocess', 'train', 'backtest', 'full' (Train + Backtest), or 'compare' (Generate comparison charts).",
     )
 
     parser.add_argument(
@@ -133,10 +134,11 @@ def main():
                 print(f"🔥 Starting Training for Model: {model.upper()}")
                 print(f"{'=' * 40}")
 
-                # Update config for current model
-                config["project"]["selected_model"] = model
+                # deepcopy로 모델 간 config 오염 방지
+                model_config = copy.deepcopy(config)
+                model_config["project"]["selected_model"] = model
                 try:
-                    run_train(config)
+                    run_train(model_config)
                     print(f"✅ Finished Training {model.upper()}")
                 except Exception as e:
                     print(f"❌ Error Training {model.upper()}: {e}")
@@ -156,13 +158,12 @@ def main():
                 print(f"🧪 Starting Backtest for Model: {model.upper()}")
                 print(f"{'=' * 40}")
 
-                config["project"]["selected_model"] = model
+                # deepcopy로 모델 간 config 오염 방지
+                model_config = copy.deepcopy(config)
+                model_config["project"]["selected_model"] = model
                 try:
-                    # Clear model_path arg if it was specific to one model,
-                    # or handle it if user provided a dir.
-                    # For simplicity in 'all' mode, we usually rely on auto-loading best_model.
-                    # So we pass None to let pipeline find the best model for 'model'.
-                    run_backtest(config, model_path=None)
+                    # For simplicity in 'all' mode, we rely on auto-loading best_model.
+                    run_backtest(model_config, model_path=None)
                     print(f"✅ Finished Backtest {model.upper()}")
                 except Exception as e:
                     print(f"❌ Error Backtesting {model.upper()}: {e}")
@@ -183,12 +184,14 @@ def main():
                 print(f"🔄 Processing Model: {model.upper()} (Train + Backtest)")
                 print(f"{'=' * 60}")
 
-                config["project"]["selected_model"] = model
+                # deepcopy로 모델 간 config 오염 방지
+                model_config = copy.deepcopy(config)
+                model_config["project"]["selected_model"] = model
 
                 # 1. Train
                 try:
                     print(f"\n🔥 [Step 1/2] Training {model.upper()}...")
-                    run_train(config)
+                    run_train(model_config)
                 except Exception as e:
                     print(f"❌ Training Failed for {model.upper()}: {e}")
                     continue  # Skip backtest if train fails
@@ -197,7 +200,7 @@ def main():
                 try:
                     print(f"\n🧪 [Step 2/2] Backtesting {model.upper()}...")
                     run_backtest(
-                        config, model_path=None
+                        model_config, model_path=None
                     )  # Auto-load just-trained model
                     print(f"✅ {model.upper()} Pipeline Completed!")
                 except Exception as e:
@@ -214,6 +217,20 @@ def main():
 
             # 2. Backtest
             run_backtest(config, model_path=None)
+
+    elif args.mode == "compare":
+        # 비교 차트 생성
+        print("\n📊 [COMPARE MODE] Generating comparison charts...")
+
+        # 스크립트의 로직을 import 하지 않고 직접 실행
+        import subprocess
+        import sys
+
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(
+            script_dir, "scripts", "generate_comparison_chart.py"
+        )
+        subprocess.run([sys.executable, script_path], cwd=os.path.dirname(script_dir))
 
 
 if __name__ == "__main__":

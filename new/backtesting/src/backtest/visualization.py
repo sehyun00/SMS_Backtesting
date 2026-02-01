@@ -42,6 +42,33 @@ class Visualizer:
             df_log.to_csv(path, index=False)
             print(f"✅ Trade logs saved to {path}")
 
+    def save_metrics(
+        self, results_map: Dict[str, Dict], initial_capital: float = 1_000_000
+    ):
+        """
+        백테스팅 결과 메트릭을 CSV로 저장.
+        generate_comparison_chart.py에서 자동으로 읽어올 수 있도록 함.
+        """
+        metrics_list = []
+        for name, res in results_map.items():
+            values = res.get("portfolio_values", [])
+            if not values:
+                continue
+
+            metrics = compute_metrics(values, initial_capital=initial_capital)
+            metrics["Strategy"] = name
+            metrics_list.append(metrics)
+
+        if metrics_list:
+            df = pd.DataFrame(metrics_list)
+            # 컬럼 순서 정리
+            cols = ["Strategy", "CAGR", "Sharpe", "MDD", "Total_Return"]
+            df = df[[c for c in cols if c in df.columns]]
+
+            path = os.path.join(self.log_dir, "backtest_metrics.csv")
+            df.to_csv(path, index=False)
+            print(f"✅ Backtest metrics saved to {path}")
+
     def plot_comparison(
         self, results_map: Dict[str, Dict], title: str = "Backtest Comparison"
     ):

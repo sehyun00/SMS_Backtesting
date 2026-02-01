@@ -21,8 +21,10 @@ class DDPGAgent(BaseModel):
 
         # Determine effective Num Features (F * T)
         raw_features = len(config["data"]["features"])
+        # Fama-French 5-Factor: Mkt_RF, SMB, HML, RMW, CMA
+        FAMA_FRENCH_FACTORS = 5
         if "factors" in config["data"]:
-            raw_features += len(config["data"]["factors"]["weights"])
+            raw_features += FAMA_FRENCH_FACTORS
 
         window_size = config["data"]["window_size"]
         self.effective_num_features = raw_features * window_size
@@ -62,8 +64,9 @@ class DDPGAgent(BaseModel):
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.lr_actor)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.lr_critic)
 
-        # Replay Buffer
-        self.buffer = ReplayBuffer(capacity=10000)
+        # Replay Buffer (config에서 크기 읽기)
+        buffer_size = config["training"].get("buffer_size", 10000)
+        self.buffer = ReplayBuffer(capacity=buffer_size)
 
     def forward(self, x: torch.Tensor, adj: torch.Tensor = None) -> torch.Tensor:
         # Return prediction for compatibility

@@ -1,44 +1,54 @@
-# SMS_Backtesting 연구를 위한 전역 설정 (Global Configuration)
+# ============================================================
+# SMS Backtesting Configuration
+# Fama-French 5-Factor + TGNN/DDPG/Hybrid Models
+# ============================================================
 
 project:
   name: "Hybrid_TGNN_DDPG_Research"
   seed: 42
-  device: "cuda" # 또는 "cpu"
-  selected_model: "ddpg"  # Options: "tgnn", "ddpg", "hybrid"
+  device: "cuda"  # 또는 "cpu"
+  selected_model: "hybrid"  # Options: "tgnn", "ddpg", "hybrid", "ALL"
 
 paths:
-  data_dir: "../data"
-  processed_data: "../data/processed_daily_5factor_model.csv"
+  data_dir: "../../data"
   results_dir: "results"
 
 data:
   window_size: 12
   predict_window: 1
-  stock_universes: [] # Empty list = Use ALL stocks found in data (approx 55)
-  features: ["Open", "High", "Low", "Close", "Volume"] 
-  # Fama-French 5-Factor (Mkt_RF, SMB, HML, RMW, CMA) 사용
-  factors:
-    weights:
-      value: 0.3
-      momentum: 0.3
-      volatility: 0.2
-      beta: 0.2
+  stock_universes: []  # Empty = Use ALL stocks (55개)
+  features: ["Open", "High", "Low", "Close", "Volume"]
+  # Fama-French 5-Factor는 코드에서 자동으로 5개로 계산됨
 
 model:
-  softmax_temperature: 10 # Global: Controls Portfolio Diversification (>1.0: Diverse, <1.0: Concentrated)
+  softmax_temperature: 10.0  # Portfolio Diversification (>1: Diverse, <1: Concentrated)
+  
+  # Hybrid 앙상블 Alpha 설정
+  hybrid_alpha_min: 0.2
+  hybrid_alpha_max: 0.8
+  hybrid_alpha_mode: "dynamic"  # "fixed" 또는 "dynamic" (리밸런싱 주기 인식)
+  hybrid_horizon_dim: 8         # 리밸런싱 주기 임베딩 차원
+  
   tgnn:
     hidden_dim: 64
     num_heads: 4
     dropout: 0.1
+  
   ddpg:
     actor_lr: 0.0001
     critic_lr: 0.001
     gamma: 0.99
     tau: 0.001
-    buffer_size: 10000
-    batch_size: 64
+    batch_size: 64  # trainer.py에서 사용
 
 training:
   episodes: 800
   early_stopping: 50
+  batch_size: 64
+  buffer_size: 10000
   test_split_date: "2021-01-01"
+
+backtest:
+  initial_capital: 1000000
+  transaction_cost: 0.001  # 0.1%
+  risk_free_rate: 0.02     # 연간 2% (Sharpe Ratio용)

@@ -108,11 +108,38 @@ class Trainer:
                 # DDPG / RL Loop
                 # 1. Prepare Data
                 next_features = batch["next_features"].to(self.device)
+                adj = batch.get("adj_matrix")
+                if adj is not None:
+                    adj = adj.to(self.device)
 
                 # 2. Select Action (Batch Exploration)
-                self.model.actor.eval()
+                # Hybrid 모델은 forward()로, DDPG는 actor()로 처리
+                model_class_name = self.model.__class__.__name__
+
+                self.model.eval()
                 with torch.no_grad():
-                    action_probs, _ = self.model.actor(features)
+                    if model_class_name == "HybridAgent":
+                        # Hybrid: forward() 호출 + 랜덤 horizon 샘플링 (다양한 리밸런싱 주기 학습)
+                        import random
+
+                        horizon = random.randint(
+                            0, 3
+                        )  # 0=monthly, 1=quarterly, 2=semiannual, 3=annual
+                        if adj is not None:
+                            action_probs, _ = self.model(features, adj, horizon=horizon)
+                        else:
+                            # adj가 없으면 단위행렬 사용
+                            N = features.shape[1]
+                            adj = (
+                                torch.eye(N)
+                                .unsqueeze(0)
+                                .expand(features.shape[0], -1, -1)
+                                .to(self.device)
+                            )
+                            action_probs, _ = self.model(features, adj, horizon=horizon)
+                    else:
+                        # DDPG: 기존 로직
+                        action_probs, _ = self.model.actor(features)
                     actions = action_probs.cpu().numpy()  # [B, N]
 
                 # Add Dirichlet Noise (Vectorized)
@@ -156,8 +183,8 @@ class Trainer:
                     # Buffer not full yet
                     loss = 0
 
-            # Only step main optimizer if NOT DDPG (DDPG has internal optimizers)
-            if self.model_type != "ddpg":
+            # Only step main optimizer for TGNN (DDPG/Hybrid have internal optimizers)
+            if self.model_type == "tgnn":
                 self.optimizer.step()
 
         return total_loss / len(self.dataloader)

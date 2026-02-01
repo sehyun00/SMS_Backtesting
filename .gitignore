@@ -18,8 +18,7 @@ ENV/
 *.swp
 
 # Data
-*.csv
-!data/stock_list.csv
+# *.csv
 
 # Models
 *.pt

@@ -1,13 +1,12 @@
 ---
 purpose: 딥러닝 모델 구현체 (DDPG, TGNN, Hybrid)
-known_issues: [softmax_concentration, logit_explosion]
 factors: Fama-French 5-Factor (Mkt_RF, SMB, HML, RMW, CMA)
 ---
 
 # Models Module (딥러닝 아키텍처)
 
-> ⚠️ **알려진 이슈**:
-> - **포트폴리오 쏠림**: `softmax_temperature`를 높여도 해결되지 않음 (Logit 폭발 현상)
+> ✅ **해결된 이슈**:
+> - **포트폴리오 쏠림**: `softmax_temperature` 적용으로 해결됨 (기본값: 10.0)
 
 `src/models`는 프로젝트에서 사용되는 모든 딥러닝 모델의 구현체를 포함합니다. Clean Architecture 원칙에 따라, 모델은 오직 `forward`와 `predict` 로직만 가지며, 학습 루프나 데이터 로딩 로직은 포함하지 않습니다.
 
@@ -41,8 +40,10 @@ classDiagram
         +select_action(state)
     }
     class HybridAgent {
-        +TGNN encoder
-        +DDPGAgent rl_agent
+        +DDPGAgent ddpg
+        +TGNN tgnn
+        +ensemble_net
+        +horizon_embedding
     }
 
     BaseModel <|-- TGNN

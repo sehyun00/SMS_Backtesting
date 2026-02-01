@@ -13,30 +13,42 @@ class StrategyHandler:
         self.device = device
 
     def get_weights(
-        self, strategy_type: str, model, window: Dict[str, Any], target_head: str = None
+        self,
+        strategy_type: str,
+        model,
+        window: Dict[str, Any],
+        target_head: str = None,
+        horizon: int = 0,
     ) -> np.ndarray:
         """
         Determines portfolio weights based on strategy type.
+
+        Args:
+            horizon: 리밸런싱 주기 (0=monthly, 1=quarterly, 2=semiannual, 3=annual)
         """
         if strategy_type == "buy_and_hold":
             return np.ones(self.n_stocks) / self.n_stocks
 
         elif strategy_type == "model":
-            return self._model_strategy(model, window, target_head)
+            return self._model_strategy(model, window, target_head, horizon)
 
         else:
             # Default fallback
             return np.ones(self.n_stocks) / self.n_stocks
 
     def _model_strategy(
-        self, model, window: Dict[str, Any], target_head: str
+        self, model, window: Dict[str, Any], target_head: str, horizon: int = 0
     ) -> np.ndarray:
         """
         Executes model inference and applies weighting logic.
 
         [모델별 출력 형식 차이]
-        - DDPG/Hybrid: Actor가 이미 Softmax 적용된 weights 반환 → 그대로 사용
+        - DDPG: Actor가 이미 Softmax 적용된 weights 반환 → 그대로 사용
+        - Hybrid: forward() 호출하여 동적 alpha 적용
         - TGNN: Raw scores 반환 → _calculate_softmax_weights()로 변환 필요
+
+        Args:
+            horizon: 리밸런싱 주기 (0=monthly, 1=quarterly, 2=semiannual, 3=annual)
 
         Returns:
             np.ndarray: 포트폴리오 비중 (sum ≈ 1.0)
@@ -56,11 +68,25 @@ class StrategyHandler:
         # 2. Inference
         model.eval()
         with torch.no_grad():
-            output = None
+            # Hybrid 모델 전용 처리 (동적 Alpha 지원)
+            model_class_name = model.__class__.__name__
+            if model_class_name == "HybridAgent":
+                # Hybrid: forward() 호출로 동적 alpha 적용
+                if adj is not None:
+                    weights, alpha = model(
+                        features, adj, target_head=target_head, horizon=horizon
+                    )
+                else:
+                    # adj가 없으면 단위행렬 사용
+                    N = features.shape[1]
+                    adj = torch.eye(N).unsqueeze(0).to(self.device)
+                    weights, alpha = model(
+                        features, adj, target_head=target_head, horizon=horizon
+                    )
+                return weights.cpu().numpy()[0]
 
-            # Check for generic 'actor' (RL Agents) vs forward (Supervised)
-            if hasattr(model, "actor"):
-                # DDPG / Hybrid
+            # DDPG 및 기타 RL 모델
+            elif hasattr(model, "actor"):
                 try:
                     if adj is not None:
                         output = model.actor(features, adj)

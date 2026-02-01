@@ -19,8 +19,10 @@ class TGNN(BaseModel):
 
         # Config parsing
         self.num_features = len(config["data"]["features"])
+        # Fama-French 5-Factor: Mkt_RF, SMB, HML, RMW, CMA
+        FAMA_FRENCH_FACTORS = 5
         if "factors" in config["data"]:
-            self.num_features += len(config["data"]["factors"]["weights"])
+            self.num_features += FAMA_FRENCH_FACTORS
 
         self.num_stocks = len(config["data"]["stock_universes"])
         self.tgnn_cfg = config["model"]["tgnn"]
@@ -128,3 +130,32 @@ class TGNN(BaseModel):
             adj = batch["adj_matrix"].to(self.device)
             preds, _ = self.forward(x, adj, target_type="Momentum1M")
         return preds.cpu()
+
+    def get_portfolio_weights(
+        self,
+        x: torch.Tensor,
+        adj: torch.Tensor,
+        target_head: str = "Momentum1M",
+        temperature: float = 1.0,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        TGNN scores를 포트폴리오 비중으로 변환.
+
+        Hybrid Composition에서 사용:
+        - DDPG와 동일한 출력 형식(weights, hidden) 반환
+
+        Args:
+            x: [Batch, N, T, F]
+            adj: [Batch, N, N]
+            target_head: 사용할 예측 헤드
+            temperature: Softmax temperature (default: 1.0)
+
+        Returns:
+            weights: [Batch, N] 포트폴리오 비중 (sum=1)
+            embeddings: [Batch, N, D] 노드 임베딩
+        """
+        import torch.nn.functional as F
+
+        scores, embeddings = self.forward(x, adj, target_type=target_head)
+        weights = F.softmax(scores / temperature, dim=-1)
+        return weights, embeddings

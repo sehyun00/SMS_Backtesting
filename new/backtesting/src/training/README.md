@@ -42,9 +42,14 @@ factors: Fama-French 5-Factor (Mkt_RF, SMB, HML, RMW, CMA)
     *   `train()`: 전체 데이터셋에 대해 학습을 수행하고 Checkpoint를 `results/{model}/checkpoints/`에 저장합니다.
     *   `finetune(epochs, lr_factor)`: **전이 학습(Transfer Learning)**을 위해, 사전 학습된 모델을 새로운 데이터셋(예: 다른 종목 유니버스)에 맞춰 미세 조정합니다. 로그는 `results/{model}/logs/`에 저장됩니다.
 
-### 3. RL Trainer (`rl_trainer.py`)
+### 3. RL Training (Trainer 내 통합)
 강화학습 에이전트(DDPG, Hybrid)를 학습합니다.
-*   **Process**: Environment $\leftrightarrow$ Agent 상호작용을 통해 Replay Buffer에 경험을 쌓고, 배치 단위로 학습합니다.
+
+> ℹ️ **Note**: DDPG/Hybrid 학습은 `trainer.py`의 `_run_epoch()` 메서드 내에서 통합 처리됩니다.
+
+*   **Process**: Environment ↔ Agent 상호작용을 통해 Replay Buffer에 경험을 쌓고, 배치 단위로 학습합니다.
+*   **Hybrid 동적 Alpha**: Hybrid 모델은 `forward()` 호출 시 랜덤 horizon(0~3)을 샘플링하여 모든 리밸런싱 주기에 대해 학습합니다.
+*   **Ensemble Net 학습**: Hybrid의 `update()` 메서드에서 `ensemble_optimizer`를 통해 alpha 결정 네트워크도 함께 학습됩니다.
 
 ## 🚀 사용법 (Usage)
 

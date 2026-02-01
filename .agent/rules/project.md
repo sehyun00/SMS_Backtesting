@@ -1,3 +1,9 @@
+---
+trigger: always_on
+glob:
+description: 코드 수정 시 project-context 스킬 참조 필수
+---
+
 # 프로젝트 규칙
 
 ## 코드 수정 시 필수 사항
