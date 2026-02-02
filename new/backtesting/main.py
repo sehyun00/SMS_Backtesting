@@ -46,6 +46,41 @@ from src.pipelines.train_pipeline import run_train
 from src.pipelines.backtest_pipeline import run_backtest
 
 
+def set_seed(seed: int, deterministic: bool = True, benchmark: bool = False):
+    """
+    Set seeds for all random number generators to ensure reproducibility.
+    """
+    import random
+    import numpy as np
+    import torch
+
+    # 1. Python random
+    random.seed(seed)
+
+    # 2. NumPy
+    np.random.seed(seed)
+
+    # 3. PyTorch
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # For multi-GPU
+
+    # 4. Hash Seed
+    os.environ["PYTHONHASHSEED"] = str(seed)
+
+    # 5. Deterministic Behavior (CUDNN)
+    if deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = (
+            benchmark  # False is better for reproducibility
+        )
+    else:
+        torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.benchmark = True  # True is better for performance
+
+    print(f"🔒 Reproducibility Set: Seed={seed}, Deterministic={deterministic}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="SMS Backtesting Framework Main Entry Point"
@@ -90,6 +125,33 @@ def main():
 
     # 1. Load Config
     config = load_config(args.config)
+
+    # 2. Set Seed (Reproducibility)
+    repro_config = config.get("model", {}).get("reproducibility", {})
+    # Fallback to config path structure if set elsewhere or defaults
+    if not repro_config:
+        # Check newly added path structure
+        repro_config = config.get(
+            "reproducibility", {}
+        )  # If moved to top level? No, put in model as per plan, wait checks.
+        # Actually in the plan I put it under 'model' but the user might want it global.
+        # Let's check config.yaml again. It was put under 'model' as per my last tool call.
+        # Wait, I put it under 'model' in config.yaml edit, so config['model']['reproducibility'].
+        pass
+
+    # Re-read config structure properly
+    repro_conf = config.get("model", {}).get("reproducibility", {})
+    if not repro_conf:
+        # Fallback to defaults if missing
+        seed = 42
+        deterministic = True
+        benchmark = False
+    else:
+        seed = repro_conf.get("seed", 42)
+        deterministic = repro_conf.get("deterministic", True)
+        benchmark = repro_conf.get("cudnn_benchmark", False)
+
+    set_seed(seed, deterministic, benchmark)
 
     if args.mode == "preprocess":
         from src.preprocessing.pipeline import Pipeline  # Lazy import

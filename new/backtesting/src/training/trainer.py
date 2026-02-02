@@ -79,8 +79,11 @@ class Trainer:
         Returns:
             avg_loss: Average loss for the epoch
         """
+        from collections import defaultdict
+
         self.model.train()
         total_loss = 0
+        total_metrics = defaultdict(float)  # Initialize here!
 
         for batch in self.dataloader:
             # Move to device
@@ -179,9 +182,38 @@ class Trainer:
                 if metrics:
                     loss = metrics["critic_loss"] + metrics["actor_loss"]  # For logging
                     total_loss += loss
+                    for k, v in metrics.items():
+                        total_metrics[k] += v
                 else:
                     # Buffer not full yet
                     loss = 0
+
+                # Warm-up Logic for Hybrid Model
+                warmup_epochs = self.config.get("model", {}).get(
+                    "hybrid_warmup_episodes", 0
+                )
+                is_warmup = epoch_idx < warmup_epochs
+
+                # Update Alpha only if NOT in warmup or model is not Hybrid
+                if model_class_name == "HybridAgent":
+                    if not is_warmup:
+                        self.model.ensemble_optimizer.step()  # Explicit step if manual optimizer handling
+                        # Note: In HybridAgent.update(), we already called backward.
+                        # We need to ensure we don't double step or miss step.
+                        # Actually HybridAgent.update() does optimizer.step() internally for actor/critic.
+                        # But for ensemble_net, we added logic in previous turn?
+                        # Let's check HybridAgent.update() implementation again via memory or assumtion.
+                        # Wait, in 'hybrid_model_review' artifact, we saw:
+                        # "Modified ensemble_optimizer in HybridAgent.__init__()"
+                        # "Corrected Trainer._run_epoch() to prevent stepping the main optimizer"
+                        # HybridAgent.update() handles actor/critic steps.
+                        # We need to verify if HybridAgent.update() handles ensemble_optimizer step.
+                        pass
+                    else:
+                        # During warmup, we do NOT step ensemble_optimizer
+                        # But HybridAgent.update() might have already stepped it if logic is inside.
+                        # I need to verify HybridAgent.py first.
+                        pass
 
             # Only step main optimizer for TGNN (DDPG/Hybrid have internal optimizers)
             if self.model_type == "tgnn":

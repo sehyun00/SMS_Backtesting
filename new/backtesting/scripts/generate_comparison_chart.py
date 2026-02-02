@@ -68,113 +68,16 @@ def load_metrics_from_csv():
     return performance_data, loaded_models, missing_models
 
 
-def get_fallback_data():
-    """
-    CSV 파일이 없을 때 사용할 대체 데이터 (이전 결과).
-    경고: 이 데이터는 최신이 아닐 수 있습니다.
-    """
-    return {
-        "Benchmark": {
-            "CAGR": 5.89,
-            "Sharpe": 0.22,
-            "MDD": 21.51,
-            "Return": 25.20,
-            "Model": "Benchmark",
-        },
-        "TGNN_Monthly": {
-            "CAGR": 5.06,
-            "Sharpe": 0.16,
-            "MDD": 25.67,
-            "Return": 21.42,
-            "Model": "TGNN",
-        },
-        "TGNN_Quarterly": {
-            "CAGR": 5.99,
-            "Sharpe": 0.22,
-            "MDD": 22.11,
-            "Return": 25.69,
-            "Model": "TGNN",
-        },
-        "TGNN_Semiannual": {
-            "CAGR": 0.77,
-            "Sharpe": -0.06,
-            "MDD": 25.38,
-            "Return": 3.06,
-            "Model": "TGNN",
-        },
-        "TGNN_Annual": {
-            "CAGR": 0.02,
-            "Sharpe": -0.10,
-            "MDD": 24.66,
-            "Return": 0.06,
-            "Model": "TGNN",
-        },
-        "DDPG_Monthly": {
-            "CAGR": 10.00,
-            "Sharpe": 0.35,
-            "MDD": 36.50,
-            "Return": 45.42,
-            "Model": "DDPG",
-        },
-        "DDPG_Quarterly": {
-            "CAGR": 11.35,
-            "Sharpe": 0.43,
-            "MDD": 25.82,
-            "Return": 52.58,
-            "Model": "DDPG",
-        },
-        "DDPG_Semiannual": {
-            "CAGR": 7.48,
-            "Sharpe": 0.25,
-            "MDD": 25.81,
-            "Return": 32.74,
-            "Model": "DDPG",
-        },
-        "DDPG_Annual": {
-            "CAGR": 11.48,
-            "Sharpe": 0.42,
-            "MDD": 24.54,
-            "Return": 53.23,
-            "Model": "DDPG",
-        },
-        "HYBRID_Monthly": {
-            "CAGR": 27.89,
-            "Sharpe": 0.86,
-            "MDD": 39.01,
-            "Return": 162.83,
-            "Model": "Hybrid",
-        },
-        "HYBRID_Quarterly": {
-            "CAGR": 4.45,
-            "Sharpe": 0.08,
-            "MDD": 47.91,
-            "Return": 18.66,
-            "Model": "Hybrid",
-        },
-        "HYBRID_Semiannual": {
-            "CAGR": -0.89,
-            "Sharpe": -0.09,
-            "MDD": 54.99,
-            "Return": -3.46,
-            "Model": "Hybrid",
-        },
-        "HYBRID_Annual": {
-            "CAGR": -3.13,
-            "Sharpe": -0.17,
-            "MDD": 57.45,
-            "Return": -11.76,
-            "Model": "Hybrid",
-        },
-    }
-
-
 # 메트릭 로드
 print("📊 Loading backtest metrics...")
 performance_data, loaded_models, missing_models = load_metrics_from_csv()
 
 if not performance_data:
-    print("⚠️ No metrics files found. Using fallback data (may be outdated).")
-    performance_data = get_fallback_data()
+    print("❌ No metrics files found in results directories.")
+    print(
+        "   Please run backtests first: python new/backtesting/main.py --mode backtest"
+    )
+    exit(1)
 else:
     print(f"✅ Loaded metrics from: {', '.join(loaded_models)}")
     if missing_models:
@@ -264,12 +167,20 @@ plt.savefig(
 print(f"✅ Saved: {OUTPUT_DIR}/cagr_comparison_all.png")
 
 # 2. Sharpe Ratio 비교 (전체)
+# Sharpe 순으로 정렬
+sharpe_strategies = sorted(
+    performance_data.keys(), key=lambda x: performance_data[x]["Sharpe"], reverse=True
+)
 fig, ax = plt.subplots(figsize=(16, 8))
-sharpe_values = [performance_data[s]["Sharpe"] for s in all_strategies]
+sharpe_values = [performance_data[s]["Sharpe"] for s in sharpe_strategies]
+colors_sharpe = [get_color(s) for s in sharpe_strategies]
 
-bars = ax.bar(x, sharpe_values, color=colors, edgecolor="white", linewidth=1.5)
-ax.set_xticks(x)
-ax.set_xticklabels(all_strategies, rotation=45, ha="right", fontsize=10)
+x_sharpe = range(len(sharpe_strategies))
+bars = ax.bar(
+    x_sharpe, sharpe_values, color=colors_sharpe, edgecolor="white", linewidth=1.5
+)
+ax.set_xticks(x_sharpe)
+ax.set_xticklabels(sharpe_strategies, rotation=45, ha="right", fontsize=10)
 ax.set_ylabel("Sharpe Ratio", fontsize=12)
 ax.set_title("All Strategies: Sharpe Ratio Comparison", fontsize=14, fontweight="bold")
 ax.axhline(y=0, color="gray", linestyle="--", alpha=0.5)
