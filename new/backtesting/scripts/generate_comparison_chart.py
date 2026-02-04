@@ -17,7 +17,7 @@ import glob
 # 스크립트 위치: new/backtesting/scripts/
 # results 위치: {project_root}/results/
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 OUTPUT_DIR = os.path.join(RESULTS_DIR, "comparison")
 os.makedirs(OUTPUT_DIR, exist_ok=True)

@@ -17,15 +17,15 @@
 ## 🏗️ 아키텍처 및 데이터 흐름
 
 ```mermaid
-flowchart LR
-    A[Raw Data Source] -->|yfinance| B(DataCollector)
+graph LR
+    A["Raw Data Source"] -->|yfinance| B(DataCollector)
     B --> C(DataProcessor)
-    C -->|Add Indicators| D(Merged DataFrame)
-    E[Fama-French Source] -->|pandas-datareader| F(FamaFrenchLoader)
-    F -->|Merge Factors| D
+    C -->|"Add Indicators"| D("Merged DataFrame")
+    E["Fama-French Source"] -->|"pandas-datareader"| F(FamaFrenchLoader)
+    F -->|"Merge Factors"| D
     D --> G(DataSplitter)
-    G -->|Split by Sector| H[Train Data (2006-2020)]
-    G -->|Split by Sector| I[Test Data (2021-2025)]
+    G -->|"Split by Sector"| H["Train Data (2006-2020)"]
+    G -->|"Split by Sector"| I["Test Data (2021-2025)"]
 ```
 
 ## 🔧 주요 기능 상세

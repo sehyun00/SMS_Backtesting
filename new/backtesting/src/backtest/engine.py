@@ -277,4 +277,4 @@ class Backtester:
 
     def save_and_plot(self, results):
         self.visualizer.save_logs(results, self.symbols)
-        self.visualizer.plot_comparison(results)
+        self.visualizer.plot_comparison(results, initial_capital=self.initial_capital)

@@ -24,7 +24,9 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
 
     # 1. Load Data (Test)
     print("\n[1/4] Loading Test Data...")
-    test_data_path = "data/test_data.csv"
+    # Fix: Use data_dir from config instead of hardcoded "data/"
+    data_dir = config["paths"]["data_dir"]
+    test_data_path = os.path.join(data_dir, "test_data.csv")
     if not os.path.exists(test_data_path):
         print(
             f"❌ Error: {test_data_path} not found. Please run 'python main.py --mode preprocess' first."
@@ -101,6 +103,14 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
                 )
 
             config["data"]["test_valid_subset"] = valid_subset
+
+        # Fix: Ensure stock_universes is updated with inferred universe!
+        # Otherwise dataset will be empty if defaults are used.
+        if not config["data"]["stock_universes"]:
+            print(
+                f"      ℹ️ Using Inferred Universe ({len(inferred)} symbols) for Backtest."
+            )
+            config["data"]["stock_universes"] = sorted(list(inferred))
 
     if trained_universe and len(trained_universe) > 0:
         # 모든 모델을 Asset-Agnostic으로 처리 (Transfer Learning 지원)
@@ -259,7 +269,9 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
 
     # 3. Plot Comparison
     # Visualizer knows the results_dir from backtester init
-    backtester.visualizer.plot_comparison(results)
+    backtester.visualizer.plot_comparison(
+        results, initial_capital=backtester.initial_capital
+    )
 
     # Print Final Summary
     print("\n📊 Final Metrics:")

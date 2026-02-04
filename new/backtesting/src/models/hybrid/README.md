@@ -17,25 +17,50 @@
 
 ## 2. 아키텍처 (Architecture)
 
-```
-HybridAgent
-├── self.ddpg (DDPGAgent)     # 기존 DDPG 인스턴스
-├── self.tgnn (TGNN)          # 기존 TGNN 인스턴스
-└── self.ensemble_net         # 앙상블 alpha 학습
-```
+```mermaid
+graph TD
+    subgraph Inputs
+        I["Input Features (N, T, F)"]
+        Adj["Adjacency Matrix (N, N)"]
+        H_Idx["Horizon Index (0~3)"]
+    end
 
-### 앙상블 동작
+    subgraph DDPG_Path["DDPG Agent"]
+        I --> DA["DDPG Actor"]
+        DA --> DW["DDPG Weights (N)"]
+        DA --> DE["DDPG State Emb (N, 64)"]
+    end
 
-```python
-# DDPG 경로
-ddpg_weights = self.ddpg.actor(x)  # [B, N]
+    subgraph TGNN_Path["TGNN Model"]
+        I --> TM["TGNN Forward"]
+        Adj --> TM
+        TM --> TW["TGNN Weights (N)"]
+        TM --> TE["TGNN Node Emb (N, 64)"]
+    end
 
-# TGNN 경로
-tgnn_weights = self.tgnn.get_portfolio_weights(x, adj)  # [B, N]
+    subgraph Horizon_Block["Horizon Embedding"]
+        H_Idx --> HE["Embedding Layer"]
+        HE --> H_Emb["Horizon Emb (1, 8)"]
+    end
 
-# 앙상블
-alpha = self.ensemble_net(concat(ddpg_emb, tgnn_emb))  # [B, 1]
-final_weights = alpha * tgnn_weights + (1-alpha) * ddpg_weights
+    subgraph Ensemble_Net["Ensemble Network (Global Pooling)"]
+        DE --> Concat["Concat All"]
+        TE --> Concat
+        DW --> Concat
+        TW --> Concat
+        H_Emb -->|Broadcast| Concat
+        
+        Concat --> GP["Global Pooling Head"]
+        GP --> Sig["Sigmoid & Clamp"]
+        Sig --> Alpha["Alpha (Scalar)"]
+    end
+
+    subgraph Output_Mixing["Final Weights"]
+        TW --> Mix["Alpha * TGNN + (1-Alpha) * DDPG"]
+        DW --> Mix
+        Alpha --> Mix
+        Mix --> Final["Final Weights (N)"]
+    end
 ```
 
 ---
@@ -59,6 +84,9 @@ model:
   softmax_temperature: 10.0   # 포트폴리오 분산도 (높을수록 균등 배분)
   hybrid_alpha_min: 0.2       # Alpha 최소값
   hybrid_alpha_max: 0.8       # Alpha 최대값
+  # [Note] Alpha Clamping (0.2 ~ 0.8) 이유:
+  # - Mode Collapse 방지: 한 모델이 비중을 100% 가져가면 앙상블 효과가 사라짐.
+  # - Robustness: TGNN(예측)과 DDPG(최적화)의 장점을 항상 혼합하여 과적합 방지.
   hybrid_alpha_mode: "dynamic" # "fixed" 또는 "dynamic" (리밸런싱 주기 인식)
   hybrid_horizon_dim: 8       # 리밸런싱 주기 임베딩 차원
 
@@ -117,6 +145,11 @@ total_loss = ensemble_loss + alpha_reg
 ```
 
 ---
+
+### 4. Data Flow (Split & Merge)
+- **Input Handling**: 입력된 데이터(`x`)를 `Prices`($[..., :5]$)와 `Macro`($[..., 5:]$)로 분리.
+- **TGNN Path**: 분리된 `Prices`와 `Macro`를 Dual-Path Encoder에 전달.
+- **DDPG Path**: 전체 데이터(`x`)를 통합 상태 벡터로 활용.
 
 ## 6. 삭제된 파일
 

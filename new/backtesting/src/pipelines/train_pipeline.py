@@ -23,7 +23,8 @@ def run_train(config: Dict[str, Any]):
 
     # 1. Load Data (Train)
     print("\n[1/4] Loading Training Data...")
-    train_data_path = "data/train_data.csv"
+    data_dir = config["paths"]["data_dir"]
+    train_data_path = os.path.join(data_dir, "train_data.csv")
     if not os.path.exists(train_data_path):
         print(
             f"❌ Error: {train_data_path} not found. Please run 'python main.py --mode preprocess' first."

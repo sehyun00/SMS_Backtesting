@@ -7,22 +7,24 @@ from src.models.layers import GraphConvLayer, TemporalAttention
 
 class TGNN(BaseModel):
     """
-    TGNN (Temporal Graph Neural Network) with Multi-Head Prediction.
-    Restored features:
-    - Batch Normalization
-    - Residual Connections
-    - 4 Independent Prediction Heads (1M, 3M, 6M, 12M)
+    Context-Aware TGNN (Temporal Graph Neural Network).
+
+    Implements separate processing paths for Local (Price) and Global (Macro) features
+    to prevent signal dilution (over-smoothing) in the Graph Convolution layers.
     """
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
 
-        # Config parsing
-        self.num_features = len(config["data"]["features"])
-        # Fama-French 5-Factor: Mkt_RF, SMB, HML, RMW, CMA
-        FAMA_FRENCH_FACTORS = 5
-        if "factors" in config["data"]:
-            self.num_features += FAMA_FRENCH_FACTORS
+        # 1. Feature Dimension Logic
+        # Calculate split dimensions based on config
+        self.raw_price_features = len(config["data"]["features"])
+
+        self.use_factors = "factors" in config["data"] and config["data"]["factors"]
+        if self.use_factors:
+            self.macro_features = 5  # Fama-French 5-Factor
+        else:
+            self.macro_features = 0
 
         self.num_stocks = len(config["data"]["stock_universes"])
         self.tgnn_cfg = config["model"]["tgnn"]
@@ -30,41 +32,66 @@ class TGNN(BaseModel):
         self.num_heads = self.tgnn_cfg.get("num_heads", 8)
         self.dropout_rate = self.tgnn_cfg.get("dropout", 0.3)
 
-        # Architecture (Hardcoded structure from legacy, or parametrized)
-        hidden_dims = [128, 128, 64]  # Legacy default
+        # Architecture Dimensions
+        # GCN Path (Local Price Info)
+        gcn_hidden_dims = [128, 128, 64]
 
-        # 1. Input Projection
-        self.input_proj = nn.Linear(self.num_features, hidden_dims[0])
-        self.input_ln = nn.LayerNorm(hidden_dims[0])
+        # Macro Path (Global Market Info)
+        macro_hidden_dim = 32
 
-        # 2. GCN Layers
+        # ---------------------------------------------------------
+        # Path A: Local Feature Encoder (Price -> GCN)
+        # ---------------------------------------------------------
+        self.input_proj = nn.Linear(self.raw_price_features, gcn_hidden_dims[0])
+        self.input_ln = nn.LayerNorm(gcn_hidden_dims[0])
+
         self.gcn_layers = nn.ModuleList(
             [
-                GraphConvLayer(hidden_dims[i], hidden_dims[i + 1])
-                for i in range(len(hidden_dims) - 1)
+                GraphConvLayer(gcn_hidden_dims[i], gcn_hidden_dims[i + 1])
+                for i in range(len(gcn_hidden_dims) - 1)
             ]
         )
 
         self.gcn_lns = nn.ModuleList(
-            [nn.LayerNorm(hidden_dims[i + 1]) for i in range(len(hidden_dims) - 1)]
+            [
+                nn.LayerNorm(gcn_hidden_dims[i + 1])
+                for i in range(len(gcn_hidden_dims) - 1)
+            ]
         )
 
-        # 3. Temporal Attention
-        self.temporal_attn = TemporalAttention(hidden_dims[-1], self.num_heads)
+        # Temporal Attention for Node Embeddings
+        self.temporal_attn = TemporalAttention(gcn_hidden_dims[-1], self.num_heads)
 
-        # 4. Multi-Task Predictors
-        # Keys correspond to dataset label columns
+        # ---------------------------------------------------------
+        # Path B: Global Context Encoder (Macro -> MLP)
+        # ---------------------------------------------------------
+        if self.use_factors:
+            self.macro_encoder = nn.Sequential(
+                nn.Linear(self.macro_features, 64),
+                nn.ReLU(),
+                nn.Linear(64, macro_hidden_dim),
+                nn.ReLU(),
+            )
+        else:
+            self.macro_encoder = None
+            macro_hidden_dim = 0
+
+        # ---------------------------------------------------------
+        # Path C: Fusion & Prediction
+        # ---------------------------------------------------------
+        # Input to predictor = Node Embedding + Global Context
+        fusion_dim = gcn_hidden_dims[-1] + macro_hidden_dim
+
         self.heads = ["Momentum1M", "Momentum3M", "Momentum6M", "Momentum12M"]
         self.predictors = nn.ModuleDict(
-            {head: self._make_predictor(hidden_dims[-1]) for head in self.heads}
+            {head: self._make_predictor(fusion_dim) for head in self.heads}
         )
 
         self.to(self.device)
 
     def _make_predictor(self, input_dim: int) -> nn.Sequential:
         """
-        Legacy predictor structure:
-        Linear -> LayerNorm -> Dropout -> Linear -> ReLU -> Dropout -> Linear
+        Predictor Head
         """
         return nn.Sequential(
             nn.Linear(input_dim, 64),
@@ -77,15 +104,26 @@ class TGNN(BaseModel):
         )
 
     def forward(
-        self, x: torch.Tensor, adj: torch.Tensor, target_type: str = "Momentum1M"
+        self,
+        x: torch.Tensor,
+        adj: torch.Tensor,
+        macro: torch.Tensor = None,
+        target_type: str = "Momentum1M",
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward pass.
+        Context-Aware Forward Pass.
+
         Args:
-            target_type: Which head to use for prediction (default: Momentum1M)
+            x: [Batch, N, T, F_price] - Local Price Features
+            adj: [Batch, N, N] - Adjacency Matrix
+            macro: [Batch, N, T, F_macro] - Global Macro Features (Optional)
+            target_type: Prediction Head
         """
         batch, N, T, F = x.shape
 
+        # ----------------------
+        # Path A: Local (GCN)
+        # ----------------------
         gcn_outputs = []
         for t in range(T):
             x_t = x[:, :, t, :]  # [B, N, F]
@@ -104,58 +142,73 @@ class TGNN(BaseModel):
 
             gcn_outputs.append(h)
 
-        # Temporal Attention
+        # Temporal Attention -> Node Embeddings
         # Stack: [B, T, N, D]
         temporal_features = torch.stack(gcn_outputs, dim=1)
-        node_embeddings = self.temporal_attn(temporal_features)  # [B, N, D]
+        node_embeddings = self.temporal_attn(temporal_features)  # [B, N, D_node]
 
-        # Prediction Head
-        # If target_type is 'all', return dict?
-        # For now, support single target per forward call as per legacy
-        if target_type in self.predictors:
-            predictions = self.predictors[target_type](node_embeddings).squeeze(-1)
+        # ----------------------
+        # Path B: Global (Macro)
+        # ----------------------
+        global_context_emb = None
+        if self.use_factors and macro is not None:
+            # Macro is [B, N, T, F_macro] -> We want to summarize T
+            # Since Macro is same for all N, we can take mean over N if we want,
+            # but usually it's cleaner to process per-node to keep tensor structure simple.
+
+            # Simple aggregation over Time: Mean or Last?
+            # Let's use Last Step Macro for immediate regime context
+            macro_last = macro[:, :, -1, :]  # [B, N, F_macro]
+            global_context_emb = self.macro_encoder(macro_last)  # [B, N, D_macro]
+        elif self.use_factors and macro is None:
+            # Fallback if macro expected but not provided (shouldn't happen with correct trainer)
+            batch_size, num_nodes = node_embeddings.shape[:2]
+            global_context_emb = torch.zeros(batch_size, num_nodes, 32).to(self.device)
+
+        # ----------------------
+        # Path C: Fusion
+        # ----------------------
+        if global_context_emb is not None:
+            # Concatenate [Node, Macro]
+            combined_embedding = torch.cat(
+                [node_embeddings, global_context_emb], dim=-1
+            )
         else:
-            # Fallback or Error
-            predictions = self.predictors["Momentum1M"](node_embeddings).squeeze(-1)
+            combined_embedding = node_embeddings
 
-        return predictions, node_embeddings
+        # ----------------------
+        # Path D: Prediction
+        # ----------------------
+        if target_type in self.predictors:
+            predictions = self.predictors[target_type](combined_embedding).squeeze(-1)
+        else:
+            predictions = self.predictors["Momentum1M"](combined_embedding).squeeze(-1)
+
+        return predictions, combined_embedding
 
     def predict(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        """
-        Evaluation helper (Default to 1M Momentum)
-        """
         self.eval()
         with torch.no_grad():
-            x = batch["features"].to(self.device)
+            x = (
+                batch["prices"].to(self.device)
+                if "prices" in batch
+                else batch["features"].to(self.device)
+            )
+            macro = batch["macro"].to(self.device) if "macro" in batch else None
             adj = batch["adj_matrix"].to(self.device)
-            preds, _ = self.forward(x, adj, target_type="Momentum1M")
+            preds, _ = self.forward(x, adj, macro=macro, target_type="Momentum1M")
         return preds.cpu()
 
     def get_portfolio_weights(
         self,
         x: torch.Tensor,
         adj: torch.Tensor,
+        macro: torch.Tensor = None,
         target_head: str = "Momentum1M",
         temperature: float = 1.0,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        TGNN scores를 포트폴리오 비중으로 변환.
-
-        Hybrid Composition에서 사용:
-        - DDPG와 동일한 출력 형식(weights, hidden) 반환
-
-        Args:
-            x: [Batch, N, T, F]
-            adj: [Batch, N, N]
-            target_head: 사용할 예측 헤드
-            temperature: Softmax temperature (default: 1.0)
-
-        Returns:
-            weights: [Batch, N] 포트폴리오 비중 (sum=1)
-            embeddings: [Batch, N, D] 노드 임베딩
-        """
         import torch.nn.functional as F
 
-        scores, embeddings = self.forward(x, adj, target_type=target_head)
+        scores, embeddings = self.forward(x, adj, macro=macro, target_type=target_head)
         weights = F.softmax(scores / temperature, dim=-1)
         return weights, embeddings

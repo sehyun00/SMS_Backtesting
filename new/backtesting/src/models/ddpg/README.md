@@ -2,7 +2,7 @@
 
 > **Status**: Active Research 🧪
 > **Task**: Portfolio Optimization (Continuous Control)
-> **Input Constraint**: Fixed Universe Size (Requires `Train N == Test N`)
+> **Input Constraint**: Variable Universe Size Supported (Asset-Agnostic) 🌍
 
 ## 1. 개요 (Overview)
 
@@ -15,16 +15,40 @@
 
 ## 2. 아키텍처 (Architecture)
 
+```mermaid
+graph TD
+    subgraph Actor["Actor (Policy Network)"]
+        S1["State (N, T, F)"] --> Enc1["Shared Factor Encoder"]
+        Enc1 --> Emb1["Stock Embeddings (N, D)"]
+        Emb1 --> Score["Score Head (Shared MLP)"]
+        Score --> Raw["Raw Scores (N, 1)"]
+        Raw --> Softmax["Portfolio Softmax (Temperature)"]
+        Softmax --> Weights["Portfolio Weights (N)"]
+    end
+
+    subgraph Critic["Critic (Q-Function)"]
+        S2["State (N, T, F)"] --> Enc2["Shared Factor Encoder"]
+        Enc2 --> Emb2["Stock Embeddings (N, D)"]
+        Weights -.-> A_Input["Action Input (N)"]
+        
+        Emb2 --> Concat["Concat (Emb + Action)"]
+        A_Input --> Concat
+        
+        Concat --> Pool["Global Pooling (Deep Sets)"]
+        Pool --> Q["Q-Value (Scalar)"]
+    end
+```
+
 ### 2.1 Actor (Policy Network)
 `src/models/ddpg/actor.py`
 
 Actor는 현재 시장 데이터를 받아 최적의 포트폴리오 비중을 출력합니다.
 
-- **Encoder**: `SharedFactorEncoder` (각 종목의 시계열 특징 추출)
-- **Global Net**: `Linear(N*64)` -> `LayerNorm` -> `ReLU` -> `Linear` -> `Softmax`
+- **Feature Integration (Concatenated)**:
+    - **Input**: `Prices`와 `Macro` 정보를 하나의 벡터로 결합(Concatenate)하여 사용.
+    - TGNN과 달리 별도의 인코더를 두지 않고, 전체 상태 공간($State Space$)을 통합적으로 해석하여 최적 행동(Action)을 결정.
+- **Global Net**: `Linear(N*TF)` -> `LayerNorm` -> `ReLU` -> `Linear` -> `Softmax`
 - **Constraints**:
-    - **Min Weight**: `0.02` (최소 보유 비중)
-    - **Max Weight**: `0.30` (최대 몰빵 방지)
     - **Normalization**: `Sum(Weights) = 1.0`
 
 ### 2.2 Critic (Value Network)
@@ -42,7 +66,7 @@ Critic은 (상태, 행동) 쌍을 받아 해당 포트폴리오의 가치(Q-Valu
 ### Input Tensor
 - **Shape**: `[Batch_Size, Num_Stocks, Window_Size, Features]`
     - 예: `[32, 10, 12, 5]` (32개 배치, 10개 종목, 12일 윈도우, 5개 지표)
-- **Note**: `Num_Stocks` 차원은 학습 시와 추론 시 **반드시 일치**해야 합니다. (DDPG의 Linear Layer 크기가 고정되어 있음)
+- **Note**: `Num_Stocks` 차원은 학습 시와 추론 시 **달라도 무방합니다**. (Shared Weights & Deep Sets 구조)
 
 ### Output Tensor
 - **Weights**: `[Batch_Size, Num_Stocks]`
@@ -57,7 +81,7 @@ Critic은 (상태, 행동) 쌍을 받아 해당 포트폴리오의 가치(Q-Valu
 
 ```yaml
 data:
-  stock_universes: ["AAPL", "MSFT", ...]  # 종목 수(N) 결정 (매우 중요!)
+  stock_universes: ["AAPL", "MSFT", ...]  # 학습할 유니버스 정의 (Test 시엔 달라도 됨)
 
 model:
   ddpg:

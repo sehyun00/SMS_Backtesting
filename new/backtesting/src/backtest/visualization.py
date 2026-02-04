@@ -70,7 +70,10 @@ class Visualizer:
             print(f"✅ Backtest metrics saved to {path}")
 
     def plot_comparison(
-        self, results_map: Dict[str, Dict], title: str = "Backtest Comparison"
+        self,
+        results_map: Dict[str, Dict],
+        title: str = "Backtest Comparison",
+        initial_capital: float = 1_000_000,
     ):
         """
         Plots comprehensive comparison: Cumulative Returns, CAGR, and MDD.
@@ -108,11 +111,12 @@ class Visualizer:
             if not values:
                 continue
 
-            initial = values[0]
-            returns = [(v / initial - 1) * 100 for v in values]
+            # Fix: Use actual initial_capital (1M) instead of Day 1 value
+            # This ensures Day 1 PnL is included in the plot/metrics
+            returns = [(v / initial_capital - 1) * 100 for v in values]
 
             # Metrics
-            metrics = compute_metrics(values, initial_capital=initial)
+            metrics = compute_metrics(values, initial_capital=initial_capital)
             cagr = metrics["CAGR"]
             mdd = metrics["MDD"]
 

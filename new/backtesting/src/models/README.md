@@ -58,8 +58,10 @@ classDiagram
 *   **스마트 전이 학습 (Smart Transfer Learning)**: `load(strict=False)` 호출 시, 저장된 가중치와 현재 모델의 Shape을 레이어별로 비교합니다. 크기가 일치하는 가중치만 선별적으로 로드하여, 종목 수($N$)가 변경되더라도 유연하게 파라미터를 복구할 수 있습니다.
 
 ### 2. TGNN (`tgnn/`)
-시계열(Temporal)과 종목 간 관계(Graph)를 동시에 학습합니다.
-*   **Input**: $[B, N, T, F]$ (Features), $[B, N, N]$ (Adjacency)
+*   **Architecture**: **Context-Aware Dual-Path Encoder**
+    *   **Price Encoder**: 종목별 가격 데이터($[B, N, T, 5]$) 학습 (Gated Recurrent Unit)
+    *   **Macro Encoder**: 거시경제 지표($[B, N, T, 5]$) 학습 (1D-CNN)
+*   **Input**: `prices` $[B, N, T, 5]$, `adj` $[B, N, N]$, `macro` $[B, N, T, 5]$
 *   **Output**: $[B, N, 4]$ (Multi-task Momentum Predictions)
 
 ### 3. DDPG (`ddpg/`)
@@ -76,10 +78,11 @@ from src.models.tgnn.model import TGNN
 model = TGNN(config)
 
 # Forward Pass (학습 시)
-predictions = model(features, adj_matrix)
+# Context-Aware: 가격과 매크로 지표 분리 입력
+predictions, embeddings = model(prices, adj_matrix, macro=macro_tensor)
 
 # Inference (예측 시)
-preds = model.predict(batch_data)
+preds = model.predict(batch_data) # 내부적으로 자동 분할 처리
 
 # 가중치 저장 및 로드
 model.save("best_model.pth")

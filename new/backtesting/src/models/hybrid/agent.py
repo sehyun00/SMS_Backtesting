@@ -130,9 +130,15 @@ class HybridAgent(BaseModel):
         ddpg_emb = self.ddpg.actor.encoder(x_flat)  # [Batch, N, 64]
 
         # --- TGNN Path ---
+        # Context-Aware: Split features into Prices and Macro
+        num_price = 5  # OHLCV
+        prices = x[:, :, :, :num_price]  # [B, N, T, 5]
+        macro = x[:, :, :, num_price:]  # [B, N, T, 5]
+
         tgnn_weights, tgnn_emb = self.tgnn.get_portfolio_weights(
-            x.to(self.tgnn.device),
+            prices.to(self.tgnn.device),
             adj.to(self.tgnn.device),
+            macro=macro.to(self.tgnn.device),
             target_head=target_head,
             temperature=self.temperature,
         )  # [Batch, N], [Batch, N, 64]

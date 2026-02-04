@@ -13,6 +13,39 @@
 
 ## 2. 아키텍처 (Architecture)
 
+```mermaid
+graph TD
+    subgraph Dual_Input["Dual-Path Input"]
+        P["Prices (N, T, 5)"] --> GRU["Price Encoder (GRU)"]
+        M["Macro (N, T, 5)"] --> CNN["Macro Encoder (1D-CNN)"]
+    end
+
+    subgraph GCN_Block["Temporal GCN Block"]
+        GRU --Concat--> G1["GCN Layer 1 + Residual"]
+        CNN --Concat--> G1
+        G1 --> LN1["LayerNorm"]
+        LN1 --> G2["GCN Layer 2 + Residual"]
+        G2 --> LN2["LayerNorm"]
+    end
+
+    subgraph Attention["Temporal Attention"]
+        LN2 --> TA["Temporal Attention Module"]
+        TA -->|Aggregates Time Step| E["Node Embeddings (N, D)"]
+    end
+
+    subgraph MultiHead["Multi-Horizon Prediction Heads"]
+        E --> H1["Head: Momentum 1M"]
+        E --> H2["Head: Momentum 3M"]
+        E --> H3["Head: Momentum 6M"]
+        E --> H4["Head: Momentum 12M"]
+    end
+    
+    H1 --> O1["Score 1M"]
+    H2 --> O2["Score 3M"]
+    H3 --> O3["Score 6M"]
+    H4 --> O4["Score 12M"]
+```
+
 ### 2.1 Main Pipeline (`model.TGNN`)
 
 데이터는 다음 4단계 과정을 거쳐 처리됩니다.
@@ -75,7 +108,7 @@ model:
     hidden_dim: 64      # 은닉층 크기
     num_heads: 4        # Attention Head 개수
     dropout: 0.1        # Dropout 비율
-    layer_num: 2        # GCN 레이어 수 (코드상 하드코딩 확인 필요)
+    layer_num: 2        # GCN 레이어 수 (Fixed: 2, models.py에서 하드코딩됨)
 ```
 
 ## 5. 재현성 및 특이사항

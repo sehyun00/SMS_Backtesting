@@ -54,12 +54,29 @@ class StrategyHandler:
             np.ndarray: 포트폴리오 비중 (sum ≈ 1.0)
         """
         # 1. Prepare Input
-        features = torch.FloatTensor(window["features"]).to(self.device)
-        if features.dim() == 2:  # [N, F] -> [1, N, F] ? No, expected [N, T, F]
-            # If window features are [N, T, F], unsqueeze to [1, N, T, F]
-            features = features.unsqueeze(0)
-        elif features.dim() == 3:  # [N, T, F] -> [1, N, T, F]
-            features = features.unsqueeze(0)
+        # 1. Prepare Input
+        # Context-Aware inputs (Dual-Path)
+        if "prices" in window and "macro" in window:
+            prices = torch.FloatTensor(window["prices"]).to(self.device)  # [N, T, F_p]
+            macro = torch.FloatTensor(window["macro"]).to(self.device)  # [N, T, F_m]
+
+            # Add Batch Dim: [1, N, T, F]
+            if prices.dim() == 3:
+                prices = prices.unsqueeze(0)
+            if macro.dim() == 3:
+                macro = macro.unsqueeze(0)
+
+            x_input = prices
+            macro_input = macro
+        else:
+            # Legacy inputs
+            features = torch.FloatTensor(window["features"]).to(self.device)
+            if features.dim() == 2:
+                features = features.unsqueeze(0)
+            elif features.dim() == 3:
+                features = features.unsqueeze(0)
+            x_input = features
+            macro_input = None
 
         adj = None
         if "adj_matrix" in window:
@@ -71,17 +88,20 @@ class StrategyHandler:
             # Hybrid 모델 전용 처리 (동적 Alpha 지원)
             model_class_name = model.__class__.__name__
             if model_class_name == "HybridAgent":
-                # Hybrid: forward() 호출로 동적 alpha 적용
+                # Hybrid uses internal buffering or needs update to accept macro if it relies on TGNN
+                # Ideally Hybrid should also accept split features, but for now let's assume it handles legacy or is updated separately.
+                # If Hybrid calls TGNN internally, it might need to pass macro.
+                # Let's pass what we have; Hybrid forward might need alignment.
+                # For now, keeping Hybrid flow simple as user focus is TGNN verification.
                 if adj is not None:
                     weights, alpha = model(
-                        features, adj, target_head=target_head, horizon=horizon
+                        x_input, adj, target_head=target_head, horizon=horizon
                     )
                 else:
-                    # adj가 없으면 단위행렬 사용
-                    N = features.shape[1]
+                    N = x_input.shape[1]
                     adj = torch.eye(N).unsqueeze(0).to(self.device)
                     weights, alpha = model(
-                        features, adj, target_head=target_head, horizon=horizon
+                        x_input, adj, target_head=target_head, horizon=horizon
                     )
                 return weights.cpu().numpy()[0]
 
@@ -89,25 +109,28 @@ class StrategyHandler:
             elif hasattr(model, "actor"):
                 try:
                     if adj is not None:
-                        output = model.actor(features, adj)
+                        output = model.actor(x_input, adj)
                     else:
-                        output = model.actor(features)
+                        output = model.actor(x_input)
                 except TypeError:
-                    output = model.actor(features)
+                    output = model.actor(x_input)
 
-                # Actor returns (weights, hidden) or just weights?
-                # DDPGActor returns (action, hidden)
                 if isinstance(output, tuple):
-                    # Direct weights from Actor
-                    raw_weights = output[0].cpu().numpy()[0]  # [N]
+                    raw_weights = output[0].cpu().numpy()[0]
                     return raw_weights
                 else:
                     return output.cpu().numpy()[0]
 
             else:
                 # TGNN / Supervised Models
-                # Returns (preds, embeddings)
-                preds, _ = model(features, adj, target_type=target_head)
+                # Pass macro if available
+                if macro_input is not None:
+                    preds, _ = model(
+                        x_input, adj, macro=macro_input, target_type=target_head
+                    )
+                else:
+                    preds, _ = model(x_input, adj, target_type=target_head)
+
                 scores = preds.cpu().numpy()[0]  # [N]
 
                 return self._calculate_softmax_weights(scores)

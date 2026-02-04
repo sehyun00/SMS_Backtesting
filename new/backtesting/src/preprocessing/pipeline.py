@@ -177,8 +177,6 @@ class Pipeline:
 
             # 전처리
             df = processor.add_technical_indicators(df)
-            df = processor.calculate_factors(df)
-            df = processor.calculate_weighted_score(df)
 
             # 메타데이터
             df["Sector"] = stock_info.get("Sector", "Unknown")

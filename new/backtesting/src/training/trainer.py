@@ -87,7 +87,17 @@ class Trainer:
 
         for batch in self.dataloader:
             # Move to device
-            features = batch["features"].to(self.device)
+            # Move to device
+            # Check for Context-Aware Split (Price vs Macro)
+            if "prices" in batch:
+                prices = batch["prices"].to(self.device)
+                macro = batch["macro"].to(self.device) if "macro" in batch else None
+            else:
+                prices = batch["features"].to(self.device)  # Legacy fallback
+                macro = None
+
+            # Legacy "features" still used for DDPG/Hybrid (Concatenated)
+            features = batch.get("features", prices).to(self.device)
             adj = batch["adj_matrix"].to(self.device)
             labels = batch["labels"].to(self.device)
 
@@ -98,7 +108,14 @@ class Trainer:
                 heads = ["Momentum1M", "Momentum3M", "Momentum6M", "Momentum12M"]
                 batch_loss = 0
                 for i, target_head in enumerate(heads):
-                    output = self.model(features, adj, target_type=target_head)
+                    # Context-Aware Call: Pass separated prices and macro
+                    if macro is not None:
+                        output = self.model(
+                            prices, adj, macro=macro, target_type=target_head
+                        )
+                    else:
+                        output = self.model(features, adj, target_type=target_head)
+
                     preds = output[0] if isinstance(output, tuple) else output
                     target_labels = labels[:, :, i]
                     if preds.shape != target_labels.shape:
@@ -160,10 +177,14 @@ class Trainer:
                 if noisy_actions.shape != target_returns.shape:
                     target_returns = target_returns.view_as(noisy_actions)
 
-                # Reward = Portfolio Return
-                rewards = torch.sum(
+                # Reward = Portfolio Return (with Loss Aversion)
+                portfolio_returns = torch.sum(
                     noisy_actions * target_returns, dim=1, keepdim=True
-                )  # [B, 1]
+                )
+                # 📉 Loss Aversion: Penalize losses x2.0
+                rewards = torch.where(
+                    portfolio_returns < 0, portfolio_returns * 2.0, portfolio_returns
+                )
 
                 # 4. Push to Buffer
                 dones = torch.zeros_like(rewards)  # Continuous task

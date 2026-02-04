@@ -7,10 +7,10 @@ project:
   name: "Hybrid_TGNN_DDPG_Research"
   seed: 42
   device: "cuda"  # 또는 "cpu"
-  selected_model: "all"  # Options: "tgnn", "ddpg", "hybrid", "ALL"
+  selected_model: "hybrid"  # Options: "tgnn", "ddpg", "hybrid", "ALL"
 
 paths:
-  data_dir: "../../data"
+  data_dir: "data"
   results_dir: "results"
 
 data:
@@ -18,7 +18,7 @@ data:
   predict_window: 1
   stock_universes: []  # Empty = Use ALL stocks (55개)
   features: ["Open", "High", "Low", "Close", "Volume"]
-  # Fama-French 5-Factor는 코드에서 자동으로 5개로 계산됨
+  factors: true  # Enable Fama-French 5-Factor (+RF)
 
 model:
   softmax_temperature: 10.0  # Portfolio Diversification (>1: Diverse, <1: Concentrated)
@@ -30,8 +30,8 @@ model:
     seed: 42
 
   # Hybrid 앙상블 Alpha 설정
-  hybrid_alpha_min: 0.2
-  hybrid_alpha_max: 0.8
+  hybrid_alpha_min: 0.1
+  hybrid_alpha_max: 0.9
   hybrid_alpha_mode: "dynamic"  # "fixed" 또는 "dynamic" (리밸런싱 주기 인식)
   hybrid_horizon_dim: 8         # 리밸런싱 주기 임베딩 차원
   hybrid_warmup_episodes: 50    # Critic 안정화를 위한 Alpha 학습 지연 (Epochs)
