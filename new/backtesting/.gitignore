@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+
+# Project Results
+results/
+logs/
+*.log
+*.csv
+*.png
+
+# VSCode
+.vscode/
+
+# Env
+.env
+venv/
