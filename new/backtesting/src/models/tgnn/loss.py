@@ -6,7 +6,7 @@ def pairwise_ranking_loss(
     predictions: torch.Tensor,
     labels: torch.Tensor,
     active_mask: torch.Tensor = None,
-    margin: float = 0.1,
+    margin: float = 0.2,  # Margin 복구 (0.1 -> 0.2) - 최소한의 변별력 확보
 ) -> torch.Tensor:
     """
     Vectorized Pairwise Ranking Loss.
@@ -52,19 +52,20 @@ def combined_loss(
     predictions: torch.Tensor,
     labels: torch.Tensor,
     active_mask: torch.Tensor = None,
-    alpha: float = 0.7,
-    beta: float = 0.3,
+    alpha: float = 1.0,
+    beta: float = 0.5,  # 랭킹 가중치 복구 (0.1 -> 0.5) - Index Hugging 탈피
 ) -> torch.Tensor:
     """
     Combined MSE + Ranking Loss.
     """
-    # MSE Loss
+    # MSE Loss (평균 제곱 오차)
     if active_mask is not None:
         mse = F.mse_loss(predictions[active_mask], labels[active_mask])
     else:
         mse = F.mse_loss(predictions, labels)
 
-    # Ranking Loss
-    rank_loss = pairwise_ranking_loss(predictions, labels, active_mask)
+    # Ranking Loss (순위 손실)
+    # 종목 간 변별력을 위해 Margin을 0.2로 설정
+    rank_loss = pairwise_ranking_loss(predictions, labels, active_mask, margin=0.2)
 
     return alpha * mse + beta * rank_loss

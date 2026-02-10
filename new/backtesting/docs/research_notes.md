@@ -36,3 +36,22 @@
     *   *해석*: DDPG의 리스크 관리 능력 덕분에 Hybrid가 TGNN보다 안정적이다.
 *   **샤프 지수 (Efficiency)**: **Hybrid (Winner)** > DDPG > TGNN > Benchmark
     *   *결론*: 결과적으로 Hybrid가 투자 효율성 면에서 가장 우수하다.
+    *   *결론*: 결과적으로 Hybrid가 투자 효율성 면에서 가장 우수하다.
+
+## ⚠️ 방법론적 고려사항 (Methodological Trade-offs)
+
+### 1. 거래 비용(Transaction Cost)의 의도적 배제
+이번 연구의 DDPG 학습 파이프라인에서는 **거래 비용(Transaction Cost) 페널티를 보상(Reward) 함수에 포함하지 않았다.** 이는 실수가 아니라, **학습 안정성(Stability)을 위한 구조적 선택**이었다.
+
+*   **배경 (Context)**:
+    *   강화학습(RL) 에이전트가 일반화된 성능을 내기 위해서는 **i.i.d (Independent and Identically Distributed)** 가정을 최대한 만족시켜야 한다.
+    *   이를 위해 우리는 학습 데이터를 무작위로 섞는 **셔플 배포(Shuffled Batch Training)** 방식을 채택했다.
+
+*   **딜레마 (Dilemma)**:
+    *   데이터가 셔플되면 시계열 연속성이 깨지므로, **"직전 포트폴리오($w_{t-1}$)"** 정보를 알 수 없게 된다.
+    *   거래 비용($|w_t - w_{t-1}| \times rate$)을 계산하려면 $w_{t-1}$이 필수적이다.
+
+*   **결정 (Decision)**:
+    *   **Reality (거래비용 반영)** vs **Stability (셔플 학습)** 중에서 우리는 **Stability**를 선택했다.
+    *   대신, **할인율($\gamma=0.99$)**과 **가중치 규제(Weight Decay)**를 통해 에이전트가 빈번한 매매보다는 장기적인 가치 투자를 지향하도록 유도하는 간접적인 제어 방식을 사용했다.
+    *   이는 향후 연구에서 **Sequential Training(순차 학습)** 파이프라인을 구축할 때 개선할 과제로 남겨둔다.

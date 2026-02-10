@@ -1,6 +1,0 @@
-Strategy,CAGR (%),Sharpe Ratio,MDD (%),Total Return (%)
-Benchmark,5.89,0.22,21.51,25.2
-HYBRID_Monthly,27.89,0.86,39.01,162.83
-DDPG_Annual,11.48,0.42,24.54,53.23
-DDPG_Quarterly,11.35,0.43,25.82,52.58
-DDPG_Monthly,10.0,0.35,36.5,45.42

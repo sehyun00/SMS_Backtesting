@@ -30,11 +30,19 @@ class DDPGAgent(BaseModel):
         self.effective_num_features = raw_features * window_size
 
         # Hyperparameters
-        self.gamma = config["training"].get("gamma", 0.99)
-        self.tau = config["training"].get("tau", 0.005)
-        self.lr_actor = config["training"].get("lr_actor", 1e-4)
-        self.lr_critic = config["training"].get("lr_critic", 1e-3)
-        self.batch_size = config["training"].get("batch_size", 64)
+        # Hyperparameters (Prioritize model.ddpg config)
+        ddpg_conf = config["model"].get("ddpg", {})
+        training_conf = config["training"]
+
+        self.gamma = ddpg_conf.get("gamma", training_conf.get("gamma", 0.99))
+        self.tau = ddpg_conf.get("tau", training_conf.get("tau", 0.005))
+        self.lr_actor = ddpg_conf.get("actor_lr", training_conf.get("lr_actor", 1e-4))
+        self.lr_critic = ddpg_conf.get(
+            "critic_lr", training_conf.get("lr_critic", 1e-3)
+        )
+        self.batch_size = ddpg_conf.get(
+            "batch_size", training_conf.get("batch_size", 64)
+        )
         self.temperature = config["model"].get("softmax_temperature", 1.0)
 
         # Networks

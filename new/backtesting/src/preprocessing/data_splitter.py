@@ -89,9 +89,9 @@ class DataSplitter:
 
         print(f"\n[Train] 섹터당 최대 {train_per_sector}개 (Test 종목 제외)")
         for sector in sorted(train_sectors):
-            sector_symbols = self.train_df[self.train_df["Sector"] == sector][
-                "Symbol"
-            ].unique()
+            sector_symbols = sorted(
+                self.train_df[self.train_df["Sector"] == sector]["Symbol"].unique()
+            )
 
             valid_symbols = []
             for sym in sector_symbols:
@@ -118,7 +118,7 @@ class DataSplitter:
             self.test_df["Symbol"].isin(test_symbols_selected)
         ].copy()
 
-        print(f"\n✅ 최종 선택 (Disjoint Split):")
+        print("\n✅ 최종 선택 (Disjoint Split):")
         print(
             f"   Train: {len(train_symbols_selected)}개 종목, {len(final_train_df):,}행"
         )
@@ -131,7 +131,7 @@ class DataSplitter:
         if intersection:
             print(f"⚠️ 경고: Train/Test 중복 종목 발생! {intersection}")
         else:
-            print(f"✨ 검증 완료: Train과 Test 종목이 완벽히 분리되었습니다.")
+            print("✨ 검증 완료: Train과 Test 종목이 완벽히 분리되었습니다.")
 
         return (
             final_train_df,

@@ -21,7 +21,7 @@ data:
   factors: true  # Enable Fama-French 5-Factor (+RF)
 
 model:
-  softmax_temperature: 10.0  # Portfolio Diversification (>1: Diverse, <1: Concentrated)
+  softmax_temperature: 3.0  # Entropy Injection for Risk Control (Prevent All-in)
   
   # Reproducibility Settings
   reproducibility:
@@ -35,6 +35,8 @@ model:
   hybrid_alpha_mode: "dynamic"  # "fixed" 또는 "dynamic" (리밸런싱 주기 인식)
   hybrid_horizon_dim: 8         # 리밸런싱 주기 임베딩 차원
   hybrid_warmup_episodes: 50    # Critic 안정화를 위한 Alpha 학습 지연 (Epochs)
+  hybrid:
+      tgnn_checkpoint: "auto"    # "auto" 또는 경로 직접 지정 (자동 탐색)
   
   tgnn:
     hidden_dim: 64
@@ -47,6 +49,8 @@ model:
     gamma: 0.99
     tau: 0.001
     batch_size: 64  # trainer.py에서 사용
+    weight_decay: 0.00001 # 1e-5 (L2 규제)
+    noise_std: 0.05       # 안정성을 위해 기존 0.1에서 축소
 
 training:
   episodes: 800

@@ -66,7 +66,8 @@ class StrategyHandler:
             if macro.dim() == 3:
                 macro = macro.unsqueeze(0)
 
-            x_input = prices
+            # Hybrid 모델은 Concatenated Input (Price + Macro) 필요
+            x_input = torch.cat([prices, macro], dim=-1)
             macro_input = macro
         else:
             # Legacy inputs
@@ -124,7 +125,11 @@ class StrategyHandler:
             else:
                 # TGNN / Supervised Models
                 # Pass macro if available
-                if macro_input is not None:
+                if macro_input is not None and "prices" in locals():
+                    preds, _ = model(
+                        prices, adj, macro=macro_input, target_type=target_head
+                    )
+                elif macro_input is not None:
                     preds, _ = model(
                         x_input, adj, macro=macro_input, target_type=target_head
                     )
