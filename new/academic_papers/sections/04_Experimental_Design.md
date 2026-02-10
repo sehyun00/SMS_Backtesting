@@ -63,37 +63,61 @@ SEIBro에서 제공하는 한국인 1년간 매수 종목별 TOP50 데이터를 
 
 - 단기 결측(≤5일)은 선형 보간(linear interpolation)으로 보완하고, 장기 결측(>5일)은 해당 구간을 삭제하였다.
 
-**(3) 정규화 (Normalization):**
+**(3) 기술적 지표 생성 (Technical Indicator Engineering):**
+
+원시 OHLCV 데이터로부터 다음의 파생변수를 생성하여 모델의 입력 특징으로 활용하였다:
+
+| 지표 | 산출 방법 | 목적 |
+| --- | --- | --- |
+| Momentum (1M, 3M, 6M, 12M) | 각각 20, 60, 120, 252 거래일 수익률 | 다중 시간 스케일의 추세 포착 |
+| Volatility | 20일 수익률 표준편차 × $\sqrt{252}$ (연율화) | 리스크 수준 정량화 |
+| RSI (14) | 14일 상대강도지수 | 과매수/과매도 판단 |
+| MACD (12, 26, 9) | 12일·26일 EMA 차이 및 9일 시그널 | 단기 모멘텀 전환 감지 |
+
+이러한 기술적 지표는 Fama-French 5-Factor(Mkt-RF, SMB, HML, RMW, CMA)와 병합되어 각 종목에 대해 총 15개의 입력 특징을 구성하였다.
+
+**(4) 정규화 (Normalization):**
 
 - 가격 및 거래량: Min–Max 스케일링(0~1)
 - 재무지표: Z-score 정규화
 - 요인 점수(Factor Score): [-3, +3] 범위로 스케일링
 
-**(4) 그래프 구축 (Graph Construction):**
+**(5) 그래프 구축 (Graph Construction):**
 
 - 종목 간 피어슨 상관계수 $\rho \ge 0.35$인 경우 엣지 생성
 - 엣지 가중치 $w = |\rho| \times \text{Similarity}_{sector}$로 정의하였으며, 시점별 그래프를 TGNN 입력으로 생성하였다 (Wu et al., 2021).
+
+**(6) 섹터 밸런싱 기반 데이터 분할 (Sector-Balanced Disjoint Split):**
+
+모델의 일반화 성능을 정확히 평가하기 위해, Train/Test 데이터셋을 **Disjoint Split** 전략으로 분리하였다. 이 전략은 두 단계로 구성된다:
+
+1. **Test Set 우선 선정**: 각 섹터에서 데이터 품질이 충분한(≥600 거래일) 대표 종목을 균등하게 선정하여 Test Set(10개 종목)을 먼저 확정한다.
+2. **Train Set 배타적 선정**: Test Set에 포함된 종목을 완전히 배제(Disjoint Condition)한 후, 나머지 종목 중 충분한 데이터(≥1,000 거래일)를 보유한 종목을 섹터당 균등하게 배분하여 Train Set을 구성한다.
+
+이 접근법은 (a) 특정 산업군에 대한 편중을 방지하고, (b) Train/Test 간 종목 중복으로 인한 정보 누출(Data Leakage)을 원천적으로 차단하며, (c) 각 섹터의 시장 특성이 테스트 환경에 고르게 반영되도록 보장한다.
 
 ## 4.3 실험 환경 및 하이퍼파라미터 (Experimental Environment & Hyperparameters)
 
 | 구성 요소 | 설정값 |
 | --- | --- |
-| TGNN 히든 레이어 | 3 (128–128–64) |
-| TGNN Attention Head | 8 |
-| DDPG Actor 구조 | [256, 128] |
-| 학습률 ($\alpha$) | 1e–4 |
-| 할인계수 ($\gamma$) | 0.95 |
-| 탐험노이즈 ($\epsilon$) | 0.1 (Ornstein–Uhlenbeck Process) |
+| TGNN 히든 레이어 | 64 |
+| TGNN Attention Head | 4 |
+| TGNN Dropout | 0.1 |
+| DDPG Actor LR | 1e–4 |
+| DDPG Critic LR | 1e–3 |
+| 할인계수 ($\gamma$) | 0.99 |
+| Soft Update ($\tau$) | 0.001 |
 | 배치크기 | 64 |
-| Replay Buffer 크기 | 1,000,000 |
-| Target Network 업데이트 | $\tau = 0.005$ |
-| Epoch 수 | 300 |
+| Replay Buffer 크기 | 10,000 |
+| Softmax Temperature ($\tau$) | 3.0 |
+| Hybrid Alpha 범위 | [0.1, 0.9] |
+| Horizon Embedding Dim | 8 |
+| Epoch 수 | 800 |
 | Optimizer | Adam |
 
 환경: Python 3.10 / PyTorch 2.2 / CUDA 12.3
-하드웨어: AWS EC2 g5.xlarge (A10G GPU 24 GB VRAM)
-운영체제: Ubuntu 22.04 LTS
-데이터베이스: MySQL 8.0 + MongoDB 6.0
+하드웨어: NVIDIA GPU (CUDA 지원)
+운영체제: Windows / Linux
 
 ### 4.3.1 재현성 프로토콜 (Reproducibility Protocol)
 본 연구는 학술적 신뢰성과 실험 결과의 완전한 재현성을 보장하기 위해 엄격한 재현성 프로토콜을 수립하고 준수하였다.
@@ -130,7 +154,7 @@ $$ \text{Sortino Ratio} = \frac{R_p - R_f}{\sigma_d} $$
 | LSTM | 단일 시계열 기반 예측 모델 | 장기 의존성 학습에 적합하지만 관계 인식 불가 |
 | Transformer | Self-Attention 기반 시계열 예측 | 전역 의존성 학습 가능, 구조적 관계 반영 미흡 |
 | TGNN | 그래프 기반 관계 예측 모델 | 시장 구조 반영 가능, 정책 최적화 미포함 |
-| TGNN+DDPG (Proposed) | 하이브리드 DSS 모델 | 관계·정책·비용 최적화 통합 구조 |
+| TGNN+DDPG (Proposed) | 하이브리드 DSS 모델 | 관계·정책·앙상블 최적화 통합 구조 |
 
 ## 4.6 검증 절차 및 강건성 평가 (Validation and Reliability Check)
 
