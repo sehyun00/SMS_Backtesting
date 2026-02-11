@@ -97,9 +97,14 @@ class Trainer:
                 macro = None
 
             # Legacy "features" still used for DDPG/Hybrid (Concatenated)
+            # DDPG/Hybrid는 여전히 Concatenated Feature를 사용합니다.
             features = batch.get("features", prices).to(self.device)
             adj = batch["adj_matrix"].to(self.device)
             labels = batch["labels"].to(self.device)
+            if "active_mask" in batch:
+                active_mask = batch["active_mask"].to(self.device)
+            else:
+                active_mask = None
 
             self.optimizer.zero_grad()
 
@@ -120,7 +125,13 @@ class Trainer:
                     target_labels = labels[:, :, i]
                     if preds.shape != target_labels.shape:
                         preds = preds.view_as(target_labels)
-                    loss = self.criterion(preds, target_labels)
+                    target_labels = labels[:, :, i]
+                    if preds.shape != target_labels.shape:
+                        preds = preds.view_as(target_labels)
+
+                    # Active Mask를 Loss에 적용
+                    # combined_loss는 active_mask를 매개변수로 받습니다.
+                    loss = self.criterion(preds, target_labels, active_mask=active_mask)
                     batch_loss += loss
                 batch_loss.backward()
                 total_loss += batch_loss.item()
@@ -164,7 +175,9 @@ class Trainer:
 
                 # Add Dirichlet Noise (Vectorized)
                 # alpha = action * concentration
-                noise_std = 0.1
+                # Dirichlet 노이즈 추가 (벡터화)
+                # alpha = action * concentration
+                noise_std = self.config["model"]["ddpg"].get("noise_std", 0.1)
                 conc = actions / (noise_std + 1e-8)
                 conc = np.clip(conc, 0.1, 100.0)
 
@@ -181,10 +194,10 @@ class Trainer:
                 portfolio_returns = torch.sum(
                     noisy_actions * target_returns, dim=1, keepdim=True
                 )
-                # 📉 Loss Aversion: Penalize losses x2.0
-                rewards = torch.where(
-                    portfolio_returns < 0, portfolio_returns * 2.0, portfolio_returns
-                )
+                # Reward = Portfolio Return (Symmetric Reward)
+                # 🌡️ Temperature=3.0 적용으로 Entropy가 자연스럽게 유지되므로,
+                # 인위적인 L2 Penalty는 제거합니다. (Alpha 보존)
+                rewards = portfolio_returns
 
                 # 4. Push to Buffer
                 dones = torch.zeros_like(rewards)  # Continuous task

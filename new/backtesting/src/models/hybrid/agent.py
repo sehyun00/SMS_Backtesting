@@ -57,6 +57,10 @@ class HybridAgent(BaseModel):
         self.ddpg = DDPGAgent(config)
         self.tgnn = TGNN(config)
 
+        # TGNN 체크포인트 로드 (Brain Transplant)
+        # Random Weight로 초기화된 TGNN은 노이즈만 생성하므로, 사전 학습된 가중치를 필수적으로 로드해야 함.
+        self._load_tgnn_checkpoint()
+
         # 리밸런싱 주기 임베딩 (동적 Alpha용)
         # 0: monthly, 1: quarterly, 2: semiannual, 3: annual
         self.horizon_embedding = nn.Embedding(4, self.horizon_dim)
@@ -64,7 +68,9 @@ class HybridAgent(BaseModel):
         # 앙상블 레이어: Global Pooling으로 alpha 계산
         # Input: DDPG hidden (64) + TGNN embedding (64) + scores (2) + horizon (8) = 138
         hidden_dim = 128
-        tgnn_emb_dim = 64  # TGNN의 마지막 hidden_dim
+        tgnn_emb_dim = 64  # TGNN Node Embedding (Fixed to 64 in TGNN)
+        if "factors" in config["data"] and config["data"]["factors"]:
+            tgnn_emb_dim += 32  # Add Macro Embedding Dimension
         ddpg_emb_dim = 64  # DDPG encoder 출력
         if self.alpha_mode == "dynamic":
             ensemble_input_dim = tgnn_emb_dim + ddpg_emb_dim + 2 + self.horizon_dim
@@ -274,3 +280,94 @@ class HybridAgent(BaseModel):
             "ensemble_loss": total_ensemble_loss.item(),
             "alpha_mean": alpha.mean().item(),
         }
+
+    def _load_tgnn_checkpoint(self):
+        """
+        TGNN 사전 학습 모델을 로드합니다.
+        Config의 'tgnn_checkpoint'가 'auto'이면 최신 모델을 자동 탐색합니다.
+        """
+        import os
+        import glob
+
+        ckpt_path = (
+            self.config.get("model", {})
+            .get("hybrid", {})
+            .get("tgnn_checkpoint", "auto")
+        )
+
+        if ckpt_path == "auto":
+            # 자동 탐색: results/tgnn/checkpoints/best_model_*.pth
+            # 주의: config 구조에 따라 results_dir 경로 추론 필요
+            base_dir = self.config["paths"]["results_dir"]
+            # tgnn 폴더가 하드코딩 되어있다고 가정 (Trainer에서 생성)
+            ckpt_dir = os.path.join(base_dir, "tgnn", "checkpoints")
+
+            if not os.path.exists(ckpt_dir):
+                print(
+                    f"⚠️ 경고: TGNN 체크포인트 디렉토리를 찾을 수 없습니다: {ckpt_dir}"
+                )
+                print(
+                    "   TGNN이 'HybridAgent' 내부에서 초기화된 상태로 시작합니다 (Random Weights)."
+                )
+                return
+
+            # 파일 리스트 (최신순 정렬)
+            files = glob.glob(os.path.join(ckpt_dir, "best_model_*.pth"))
+            if not files:
+                print(f"⚠️ 경고: {ckpt_dir} 경로에 TGNN 체크포인트 파일이 없습니다.")
+                return
+
+            # 수정시간 기준 정렬 (최신 파일)
+            latest_ckpt = max(files, key=os.path.getmtime)
+            ckpt_path = latest_ckpt
+            print(f"✅ TGNN 체크포인트 자동 탐색 성공: {ckpt_path}")
+
+        # 로드 실행
+        if ckpt_path and os.path.exists(ckpt_path):
+            try:
+                state_dict = torch.load(ckpt_path, map_location=self.device)
+                self.tgnn.load_state_dict(state_dict)
+                print(f"✅ TGNN 가중치 로드 완료: {ckpt_path}")
+
+                # 가중치 동결 (Freeze) - Hybrid 학습 중 TGNN 변질 방지
+                self.tgnn.eval()
+                for param in self.tgnn.parameters():
+                    param.requires_grad = False
+                print("🔒 TGNN 파라미터 동결 (Freeze) 완료")
+
+            except Exception as e:
+                print(f"❌ TGNN 로드 중 오류 발생: {e}")
+        else:
+            print(
+                f"⚠️ 경고: 지정된 TGNN 체크포인트 경로가 유효하지 않습니다: {ckpt_path}"
+            )
+            print("   TGNN이 Random Weights로 동작합니다 (성능 저하 위험).")
+
+    def save(self, path: str):
+        """
+        Hybrid Agent 저장 (DDPG, Ensemble Net)
+        TGNN은 저장하지 않습니다 (Freeze 상태이므로).
+        """
+        torch.save(
+            {
+                "ddpg_actor": self.ddpg.actor.state_dict(),
+                "ddpg_critic": self.ddpg.critic.state_dict(),
+                "ensemble": self.ensemble_net.state_dict(),
+                "config": self.config,
+            },
+            path,
+        )
+
+    def load(self, path: str, strict: bool = True):
+        """
+        Hybrid Agent 로드
+        Args:
+            path: 체크포인트 경로
+            strict: 엄격한 로딩 여부 (BaseModel 호환성 위해 추가, Hybrid는 수동 로드하므로 무시하거나 참조)
+        """
+        checkpoint = torch.load(path, map_location=self.device)
+        # Hybrid는 각 컴포넌트별로 state_dict가 분리되어 있으므로 strict=strict로 전달
+        self.ddpg.actor.load_state_dict(checkpoint["ddpg_actor"], strict=strict)
+        self.ddpg.critic.load_state_dict(checkpoint["ddpg_critic"], strict=strict)
+        self.ensemble_net.load_state_dict(checkpoint["ensemble"], strict=strict)
+        print(f"✅ Hybrid Agent 로드 완료 (Strict={strict}): {path}")

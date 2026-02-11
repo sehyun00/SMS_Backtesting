@@ -8,9 +8,9 @@ JoongHyun Park, Sehyun Kim, Junghyun Back, Hamin Kim, Kyungsik Lee. Hyun Lee
 
 디지털 전환과 인공지능(AI) 기술의 급속한 발전으로 의사결정 환경의 복잡성과 불확실성이 빠르게 증가하고 있다. 이에 따라 AI 기반 의사결정지원시스템(Decision Support Systems, DSS)의 중요성이 높아지고 있다. 본 연구는 금융 시장과 같이 동적이고 비정형적인 환경에서 지능적 의사결정을 지원하기 위한 신뢰할 수 있는(Trustworthy) 하이브리드 AI 기반 DSS 프레임워크를 제안한다.
 
-제안된 시스템은 Temporal Graph Neural Network (TGNN), Deep Deterministic Policy Gradient (DDPG), 그리고 Dijkstra 최적화 알고리즘을 통합하여 포트폴리오 리밸런싱(Portfolio Rebalancing) 문제를 해결한다. 특히 본 연구는 단순한 성과 향상을 넘어, AI 의사결정의 재현성(Reproducibility)과 신뢰성(Reliability)을 보장하기 위한 결정론적(Deterministic) 알고리즘과 재현성 프로토콜을 도입하였다.
+제안된 시스템은 Temporal Graph Neural Network (TGNN)와 Deep Deterministic Policy Gradient (DDPG)를 Horizon-Aware Dynamic Ensemble 메커니즘으로 통합하여 포트폴리오 리밸런싱(Portfolio Rebalancing) 문제를 해결한다. 특히 본 연구는 단순한 성과 향상을 넘어, AI 의사결정의 재현성(Reproducibility)과 신뢰성(Reliability)을 보장하기 위한 결정론적(Deterministic) 알고리즘과 재현성 프로토콜을 도입하였다.
 
-10년간의 KOSPI 및 S&P500 데이터를 활용한 실험 결과, 제안된 모델은 기존 모델 대비 평균제곱오차(MSE)가 31% 감소하고 1.01의 샤프비율(Sharpe Ratio)을 달성했을 뿐만 아니라, 반복 실험에서도 일관된 성능을 유지함을 입증하였다. 또한 Flask 기반 AI 서버와 Spring–React 사용자 인터페이스를 통합하여 실시간 DSS 환경을 구현하였으며, SHAP 및 Attention 기반 설명가능성(Explainability) 기법을 통해 모델의 의사결정 과정을 투명하게 검증하였다.
+10년간의 KOSPI 및 S&P500 데이터를 활용한 실험 결과, 제안된 Hybrid 모델은 **장기 리밸런싱 주기(Quarterly, Semiannual, Annual)에서 Benchmark를 일관되게 상회**하였으며, 특히 Annual 주기에서 CAGR 9.28%를 달성하였다. DDPG(Annual)가 최고 CAGR 10.41%를 기록했지만 주기별 성과 편차가 커서 일부 구간에서 Benchmark를 하회한 반면, Hybrid 모델은 **장기 투자 전략에 적합한 안정적 성과**를 보여 학술적 가치를 입증하였다. 또한 Flask 기반 AI 서버와 Spring–React 사용자 인터페이스를 통합하여 실시간 DSS 환경을 구현하였으며, TGNN Attention 기반 설명가능성(Explainability) 기법을 통해 모델의 의사결정 과정을 투명하게 검증하였다.
 
 본 연구는 예측 중심의 기존 DSS를 넘어, 관계 인식형(Structure-Aware)·재현 가능한(Reproducible)·설명 가능한(Explainable) 지능형 의사결정지원시스템의 새로운 표준을 제시한다.
 
@@ -54,7 +54,7 @@ AI DSS 관련 최신 연구는 크게 두 가지 방향으로 발전하고 있�
 
 1.  대부분의 연구가 모델의 성능 극대화에 치중하여, 실험 결과의 재현성(Reproducibility)과 신뢰성 검증을 간과하였다.
 2.  기존 DSS는 AI 모델을 예측 모듈로만 활용하여 의사결정의 상호작용 구조(예: 종목 간 관계)를 반영하지 못했다.
-3.  강화학습 기반 DSS 연구들은 거래비용이나 경로 제약 등 실행 단계의 제약조건(Operational Constraints)을 통합적으로 고려하지 않았다.
+3.  강화학습 기반 DSS 연구들은 예측 모듈과 정책 모듈을 독립적으로 운용하여, 시장 구조 학습과 포트폴리오 최적화를 투자 주기(Horizon)에 따라 동적으로 결합하는 앙상블 메커니즘이 부재하였다.
 
 따라서, 관계 학습(Relationship Learning), 정책 학습(Policy Optimization)뿐만 아니라 신뢰할 수 있는 재현성(Reproducibility)을 갖춘 통합 AI DSS 프레임워크의 필요성이 제기된다.
 
@@ -73,7 +73,7 @@ AI DSS 관련 최신 연구는 크게 두 가지 방향으로 발전하고 있�
 
 ① **신뢰할 수 있는 AI DSS 표준 제시**: 단순 성능 우위를 넘어, 결정론적(Deterministic) 알고리즘과 시드 고정(Seed Fixing)을 통해 언제나 검증 가능한 재현성(Reproducibility)을 확보한 AI 연구 방법론을 제시한다.
 
-② **AI 모델 통합형 DSS 설계**: 예측-정책-비용 최적화의 세 단계를 AI 모듈로 연결하는 통합형 DSS 아키텍처를 제안한다.
+② **AI 모델 통합형 DSS 설계**: 예측(TGNN)과 정책(DDPG)을 Horizon-Aware Dynamic Alpha로 동적 결합하는 통합형 DSS 아키텍처를 제안한다.
 
 ③ **AI DSS의 실시간 자동화 구현**: Flask-Spring-React 기반의 시스템 통합을 통해 사용자 피드백이 실시간으로 AI 정책 업데이트에 반영되는 구조를 구현한다.
 

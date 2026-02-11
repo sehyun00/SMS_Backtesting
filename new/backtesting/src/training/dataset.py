@@ -69,6 +69,14 @@ class FinancialDataset(Dataset):
                 window_dates, self.all_features
             )
 
+            # [N, 1] Active Mask (True if data exists, False if padded)
+            # We determine this by checking if the LAST step is padded or not.
+            # But wait, padding happens in _get_features_for_window.
+            # Let's modify _get_features_for_window to return mask as well.
+            all_features_array, active_mask_array = (
+                self._get_features_for_window_with_mask(window_dates, self.all_features)
+            )
+
             # 2. Next State (for RL)
             next_all_features_array = self._get_features_for_window(
                 next_window_dates, self.all_features
@@ -112,6 +120,7 @@ class FinancialDataset(Dataset):
                     "next_prices": torch.FloatTensor(next_prices),
                     "next_macro": torch.FloatTensor(next_macro),
                     "adj_matrix": torch.FloatTensor(adj_matrix),
+                    "active_mask": torch.BoolTensor(active_mask_array),  # [N]
                     "labels": torch.FloatTensor(labels_list),  # [N, 4]
                     "date": str(target_date),
                     # Deprecated legacy keys for backward compat if needed (but we updated trainer)
@@ -122,7 +131,63 @@ class FinancialDataset(Dataset):
 
         return windows
 
+    def _get_features_for_window_with_mask(self, window_dates, div_features):
+        current_window_df = self.df.loc[window_dates]
+        batch_features = []
+        active_mask = []
+
+        for symbol in self.symbols:
+            stock_df = current_window_df[current_window_df["Symbol"] == symbol]
+
+            # Handle missing data (e.g. not listed yet)
+            if len(stock_df) < self.window_size:
+                pad_len = self.window_size - len(stock_df)
+                vals = stock_df[div_features].values
+                vals = np.pad(vals, ((pad_len, 0), (0, 0)), mode="constant")
+                batch_features.append(vals)
+
+                # If completely empty or significantly padded, mark as inactive
+                # For simplicity, if we had to pad, we can consider it inactive for training if padding is large.
+                # But typically we want to exclude stocks that don't have data at the TARGET date.
+                # If len(stock_df) == 0, it's definitely inactive.
+                if len(stock_df) == 0:
+                    active_mask.append(False)
+                else:
+                    # If partial data exists, it might be usable, but for Ranking Loss,
+                    # we want fair comparison. Let's be strict: if any padding, inactive?
+                    # No, listing mid-window is fine.
+                    # Key is: does it have a valid Label? Label logic handles target_date existence.
+                    # Let's assume Active if at least 1 data point exists?
+                    # Better: Active if data exists at the END of the window (current time).
+                    # Since we selected window_dates based on index, stock_df contains what matches.
+                    # If the stock was NOT trading on the last day of window, it shouldn't be ranked.
+                    last_date = window_dates[-1]
+                    if last_date in stock_df.index:
+                        active_mask.append(True)
+                    else:
+                        active_mask.append(False)
+
+            else:
+                batch_features.append(stock_df[div_features].values)
+                active_mask.append(True)
+
+        # [N, T, F]
+        features_array = np.array(batch_features)
+
+        # 윈도우별 Robust Z-Score 정규화
+        mean = np.mean(features_array, axis=(0, 1), keepdims=True)
+        std = np.std(features_array, axis=(0, 1), keepdims=True)
+        features_array = (features_array - mean) / (std + 1e-8)
+
+        # [N]
+        active_mask_array = np.array(active_mask)
+
+        return features_array, active_mask_array
+
     def _get_features_for_window(self, window_dates, div_features):
+        # Legacy Wrapper
+        f, _ = self._get_features_for_window_with_mask(window_dates, div_features)
+        return f
         current_window_df = self.df.loc[window_dates]
         batch_features = []
 

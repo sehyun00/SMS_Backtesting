@@ -169,6 +169,10 @@ class Backtester:
                 target_date, prev_date, rebalance_freq
             )
 
+            # Buy & Hold: Only rebalance at the first step
+            if strategy_type == "buy_and_hold":
+                should_rebalance = i == 0
+
             if should_rebalance:
                 trade_type = "Rebalance"
                 try:
@@ -196,9 +200,16 @@ class Backtester:
 
                     if i > 0:
                         turnover = np.sum(np.abs(current_weights - prev_weights)) / 2
+
+                        # [Research Fix] Apply Transaction Cost
+                        # 비용 = 회전율 * 자본 * 수수료율
+                        cost_rate = self.config["backtest"].get("transaction_cost", 0.0)
+                        cost = capital * turnover * cost_rate
+                        capital -= cost
+
                         # if turnover >= 1e-4:
                         #     print(
-                        #         f"      [Rebalance] Step {i}: Turnover {turnover:.4f}"
+                        #         f"      [Rebalance] Step {i}: Turnover {turnover:.4f} | Cost: {cost:.2f}"
                         #     )
 
                 except Exception as e:
@@ -208,11 +219,13 @@ class Backtester:
                     current_weights = np.ones(self.n_stocks) / self.n_stocks
 
             # 2. Log Trade
+            strategy_name = strategy_type
+            if strategy_type == "model":
+                strategy_name = f"{strategy_type}_{target_head}_{rebalance_freq}"
+
             log_entry = {
                 "Date": target_date,
-                "Strategy": f"{strategy_type}_{target_head}"
-                if strategy_type == "model"
-                else strategy_type,
+                "Strategy": strategy_name,
                 "Type": trade_type,
             }
 

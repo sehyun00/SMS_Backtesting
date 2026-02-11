@@ -4,9 +4,9 @@
 
 본 연구는 관계 학습(Relational Learning)과 정책 최적화(Policy Optimization)를 통합한 하이브리드 인공지능 기반 의사결정지원시스템(AI-based Decision Support System, AI-DSS)을 제안하였다.
 
-제안된 시스템은 Temporal Graph Neural Network (TGNN)을 이용해 시장 내 종목 간 동적 상관구조를 학습하고, Deep Deterministic Policy Gradient (DDPG)를 통해 리스크와 수익 간의 균형을 강화학습 기반으로 최적화 하였다. 특히 본 연구는 AI 모델의 결과가 우연이 아님을 입증하기 위해 엄격한 재현성 프로토콜(Reproducibility Protocol)을 적용하여 신뢰할 수 있는(Trustworthy) 결과를 도출하였다.
+제안된 시스템은 Temporal Graph Neural Network (TGNN)을 이용해 시장 내 종목 간 동적 상관구조를 학습하고, Deep Deterministic Policy Gradient (DDPG)를 통해 리스크와 수익 간의 균형을 강화학습 기반으로 최적화하였다. 특히 본 연구는 AI 모델의 결과가 우연이 아님을 입증하기 위해 엄격한 재현성 프로토콜(Reproducibility Protocol)을 적용하였다.
 
-실험 결과, 제안모델은 기존 LSTM·Transformer·TGNN 대비 평균제곱오차(MSE)가 31% 감소하고, 리스크 조정 성과(Sharpe Ratio 1.01, Sortino 1.37)가 향상되었으며, 거래비용은 약 0.8%p 절감되었다. 또한 Flask–Spring–React 통합 아키텍처를 통해 AI 엔진이 실시간으로 DSS 환경에서 작동함을 검증하였고, SHAP 분석 및 TGNN Attention 시각화를 통해 모델의 설명가능성과 투명성을 확보하였다.
+실험 결과, 제안된 **Hybrid 모델은 장기 리밸런싱 주기(Quarterly, Semiannual, Annual)에서 Benchmark를 일관되게 상회**하였다. DDPG(Annual)가 최고 CAGR 10.41%를 기록했지만, 리밸런싱 주기에 따른 성과 편차가 크고 Semiannual에서 Benchmark를 하회하였다. Hybrid 모델은 Monthly(5.90%)에서 Benchmark(6.35%)를 하회했으나, **장기 투자 전략**에서는 안정적인 초과 수익을 보여 학술적 가치를 입증하였다. 또한 Flask–Spring–React 통합 아키텍처를 통해 AI 엔진이 실시간으로 DSS 환경에서 작동함을 검증하였다.
 
 이러한 결과는 AI 모델링과 DSS 통합이 상호보완적으로 작용하여 AI DSS의 지능화(Intelligence), 자동화(Automation), 그리고 신뢰성(Trustworthiness)을 동시에 달성할 수 있음을 실증적으로 보여준다.
 
@@ -51,20 +51,19 @@
 1. Al-Nassar, A., et al. (2023). Transformer–GNN hybrid for time-series learning. Knowledge-Based Systems, 263, 110396.
 2. Bai, J., et al. (2023). Deep learning-based decision support framework for unstructured data analysis. Information Sciences, 639, 119042.
 3. Chen, H., & Goetzmann, W. N. (2020). Rebalancing frequency and portfolio performance. Journal of Financial Economics, 138(3), 742–766.
-4. Dijkstra, E. W. (1959). A note on two problems in connexion with graphs. Numerische Mathematik, 1(1), 269–271.
-5. Fama, E. F., & French, K. R. (2015). A five-factor asset pricing model. Journal of Financial Economics, 116(1), 1–22.
-6. Fujimoto, S., et al. (2018). Addressing function approximation error in actor-critic methods. ICML Proceedings, 1587–1596.
-7. Gong, Z., et al. (2025). Cross-market volatility forecasting with attention-based spatio-temporal GCN. Economic Modelling, 132, 106485.
-8. Gu, X., et al. (2025). MTS: A Deep Reinforcement Learning Portfolio Management Framework with Time-Awareness. Applied Intelligence, 55(3), 1754–1771.
-9. Hao, M., et al. (2025). Collaborative multi-agent reinforcement learning for portfolio management. ACM Transactions on Intelligent Systems, 18(2).
-10. Kipf, T. N., & Welling, M. (2017). Semi-supervised classification with graph convolutional networks. ICLR Proceedings.
-11. Lee, S., & Kim, J. (2023). AI-based Decision Intelligence in DSS. Decision Support Systems, 167, 114732.
-12. Lin, R., et al. (2023). Deep Reinforcement Learning for Portfolio Optimization. Neural Computing & Applications, 35(9), 14528–14541.
-13. Lundberg, S. M., & Lee, S.-I. (2017). A unified approach to interpreting model predictions. NeurIPS, 30.
-14. Park, J., & Han, S. (2024). Explainable AI for decision support in financial trading systems. Decision Support Systems, 176, 114865.
-15. Wu, Z., et al. (2021). A comprehensive survey on graph neural networks. IEEE Transactions on Knowledge and Data Engineering, 33(4), 973–996.
-16. Xiang, S., et al. (2022). Temporal and heterogeneous graph neural network for financial time series prediction. ACM CIKM Proceedings, 310–319.
-17. Zhang, L., et al. (2024). Hybrid Reinforcement Learning-Based DSS for Investment Decision-Making. Decision Support Systems, 183, 115005.
-18. Bai, Y., et al. (2024). Explainable graph-based financial DSS under uncertainty. Expert Systems with Applications, 241, 122858.
-19. Chen, R., et al. (2023).
-20. Liu, Yanjie, et al. "A Soft Actor-Critic Deep Reinforcement-Learning-Based Robot Navigation Method Using LiDAR." Remote Sensing 16.12 (2024): 2072.
+4. Fama, E. F., & French, K. R. (2015). A five-factor asset pricing model. Journal of Financial Economics, 116(1), 1–22.
+5. Fujimoto, S., et al. (2018). Addressing function approximation error in actor-critic methods. ICML Proceedings, 1587–1596.
+6. Gong, Z., et al. (2025). Cross-market volatility forecasting with attention-based spatio-temporal GCN. Economic Modelling, 132, 106485.
+7. Gu, X., et al. (2025). MTS: A Deep Reinforcement Learning Portfolio Management Framework with Time-Awareness. Applied Intelligence, 55(3), 1754–1771.
+8. Hao, M., et al. (2025). Collaborative multi-agent reinforcement learning for portfolio management. ACM Transactions on Intelligent Systems, 18(2).
+9. Kipf, T. N., & Welling, M. (2017). Semi-supervised classification with graph convolutional networks. ICLR Proceedings.
+10. Lee, S., & Kim, J. (2023). AI-based Decision Intelligence in DSS. Decision Support Systems, 167, 114732.
+11. Lin, R., et al. (2023). Deep Reinforcement Learning for Portfolio Optimization. Neural Computing & Applications, 35(9), 14528–14541.
+12. Lundberg, S. M., & Lee, S.-I. (2017). A unified approach to interpreting model predictions. NeurIPS, 30.
+13. Park, J., & Han, S. (2024). Explainable AI for decision support in financial trading systems. Decision Support Systems, 176, 114865.
+14. Wu, Z., et al. (2021). A comprehensive survey on graph neural networks. IEEE Transactions on Knowledge and Data Engineering, 33(4), 973–996.
+15. Xiang, S., et al. (2022). Temporal and heterogeneous graph neural network for financial time series prediction. ACM CIKM Proceedings, 310–319.
+16. Zhang, L., et al. (2024). Hybrid Reinforcement Learning-Based DSS for Investment Decision-Making. Decision Support Systems, 183, 115005.
+17. Bai, Y., et al. (2024). Explainable graph-based financial DSS under uncertainty. Expert Systems with Applications, 241, 122858.
+18. Chen, R., et al. (2023).
+19. Liu, Yanjie, et al. "A Soft Actor-Critic Deep Reinforcement-Learning-Based Robot Navigation Method Using LiDAR." Remote Sensing 16.12 (2024): 2072.
