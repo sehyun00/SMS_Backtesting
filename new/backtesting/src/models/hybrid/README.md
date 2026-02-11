@@ -9,6 +9,7 @@
 이 모듈은 **DDPG**와 **TGNN**을 조합하여 포트폴리오 최적화를 수행하는 앙상블 모델입니다.
 
 기존 독립 구현 방식에서 **Composition 방식**으로 리팩토링됨:
+
 - ✅ 코드 중복 제거
 - ✅ DDPG/TGNN 버그 수정 시 자동 반영
 - ✅ 공정한 Ablation Study 가능
@@ -17,61 +18,19 @@
 
 ## 2. 아키텍처 (Architecture)
 
-```mermaid
-graph TD
-    subgraph Inputs
-        I["Input Features (N, T, F)"]
-        Adj["Adjacency Matrix (N, N)"]
-        H_Idx["Horizon Index (0~3)"]
-    end
-
-    subgraph DDPG_Path["DDPG Agent"]
-        I --> DA["DDPG Actor"]
-        DA --> DW["DDPG Weights (N)"]
-        DA --> DE["DDPG State Emb (N, 64)"]
-    end
-
-    subgraph TGNN_Path["TGNN Model"]
-        I --> TM["TGNN Forward"]
-        Adj --> TM
-        TM --> TW["TGNN Weights (N)"]
-        TM --> TE["TGNN Node Emb (N, 64)"]
-    end
-
-    subgraph Horizon_Block["Horizon Embedding"]
-        H_Idx --> HE["Embedding Layer"]
-        HE --> H_Emb["Horizon Emb (1, 8)"]
-    end
-
-    subgraph Ensemble_Net["Ensemble Network (Global Pooling)"]
-        DE --> Concat["Concat All"]
-        TE --> Concat
-        DW --> Concat
-        TW --> Concat
-        H_Emb -->|Broadcast| Concat
-        
-        Concat --> GP["Global Pooling Head"]
-        GP --> Sig["Sigmoid & Clamp"]
-        Sig --> Alpha["Alpha (Scalar)"]
-    end
-
-    subgraph Output_Mixing["Final Weights"]
-        TW --> Mix["Alpha * TGNN + (1-Alpha) * DDPG"]
-        DW --> Mix
-        Alpha --> Mix
-        Mix --> Final["Final Weights (N)"]
-    end
-```
+![Hybrid_Model_Architecture](..\hybrid\Hybrid_Model_Architecutre.png)
 
 ---
 
 ## 3. 입력 및 출력 명세 (I/O Specification)
 
 ### Input
+
 - `features`: [Batch, N, T, F]
 - `adj`: [Batch, N, N] (인접 행렬)
 
 ### Output
+
 - `weights`: [Batch, N] (포트폴리오 비중, sum=1)
 - `alpha`: [Batch, 1] (TGNN 비중, 0.2~0.8)
 
@@ -81,14 +40,14 @@ graph TD
 
 ```yaml
 model:
-  softmax_temperature: 10.0   # 포트폴리오 분산도 (높을수록 균등 배분)
-  hybrid_alpha_min: 0.2       # Alpha 최소값
-  hybrid_alpha_max: 0.8       # Alpha 최대값
+  softmax_temperature: 10.0 # 포트폴리오 분산도 (높을수록 균등 배분)
+  hybrid_alpha_min: 0.2 # Alpha 최소값
+  hybrid_alpha_max: 0.8 # Alpha 최대값
   # [Note] Alpha Clamping (0.2 ~ 0.8) 이유:
   # - Mode Collapse 방지: 한 모델이 비중을 100% 가져가면 앙상블 효과가 사라짐.
   # - Robustness: TGNN(예측)과 DDPG(최적화)의 장점을 항상 혼합하여 과적합 방지.
   hybrid_alpha_mode: "dynamic" # "fixed" 또는 "dynamic" (리밸런싱 주기 인식)
-  hybrid_horizon_dim: 8       # 리밸런싱 주기 임베딩 차원
+  hybrid_horizon_dim: 8 # 리밸런싱 주기 임베딩 차원
 
 training:
   buffer_size: 10000
@@ -96,12 +55,13 @@ training:
 
 ### Alpha 모드
 
-| 모드 | 설명 |
-|------|------|
-| `fixed` | 학습된 고정 α 사용 (기존 방식) |
+| 모드      | 설명                                      |
+| --------- | ----------------------------------------- |
+| `fixed`   | 학습된 고정 α 사용 (기존 방식)            |
 | `dynamic` | 리밸런싱 주기(horizon)에 따라 α 동적 조정 |
 
 ### Horizon 매핑
+
 - 0: Monthly
 - 1: Quarterly
 - 2: Semiannual
@@ -115,10 +75,10 @@ training:
 
 Hybrid 모델은 **3가지 구성요소**를 동시에 학습합니다:
 
-| 구성요소 | Optimizer | Loss 함수 |
-|---------|-----------|-----------|
-| DDPG Actor | `actor_optimizer` | -Q(s, a) |
-| DDPG Critic | `critic_optimizer` | MSE(Q, target_Q) |
+| 구성요소         | Optimizer            | Loss 함수             |
+| ---------------- | -------------------- | --------------------- |
+| DDPG Actor       | `actor_optimizer`    | -Q(s, a)              |
+| DDPG Critic      | `critic_optimizer`   | MSE(Q, target_Q)      |
 | **Ensemble Net** | `ensemble_optimizer` | -Q + α_regularization |
 
 ### Ensemble Net 학습 목표
@@ -147,16 +107,16 @@ total_loss = ensemble_loss + alpha_reg
 ---
 
 ### 4. Data Flow (Split & Merge)
+
 - **Input Handling**: 입력된 데이터(`x`)를 `Prices`($[..., :5]$)와 `Macro`($[..., 5:]$)로 분리.
 - **TGNN Path**: 분리된 `Prices`와 `Macro`를 Dual-Path Encoder에 전달.
 - **DDPG Path**: 전체 데이터(`x`)를 통합 상태 벡터로 활용.
 
 ## 6. 삭제된 파일
 
-| 파일 | 대체 |
-|------|------|
-| `actor.py` | `DDPGAgent.actor` 사용 |
-| `critic.py` | `DDPGAgent.critic` 사용 |
-| `encoders.py` | `TGNN` 내부 encoder 사용 |
-| `constraints.py` | 최종 정규화로 대체 |
-
+| 파일             | 대체                     |
+| ---------------- | ------------------------ |
+| `actor.py`       | `DDPGAgent.actor` 사용   |
+| `critic.py`      | `DDPGAgent.critic` 사용  |
+| `encoders.py`    | `TGNN` 내부 encoder 사용 |
+| `constraints.py` | 최종 정규화로 대체       |

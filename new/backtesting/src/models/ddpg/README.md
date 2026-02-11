@@ -13,45 +13,23 @@
 
 ---
 
-## 2. 아키텍처 (Architecture)
-
-```mermaid
-graph TD
-    subgraph Actor["Actor (Policy Network)"]
-        S1["State (N, T, F)"] --> Enc1["Shared Factor Encoder"]
-        Enc1 --> Emb1["Stock Embeddings (N, D)"]
-        Emb1 --> Score["Score Head (Shared MLP)"]
-        Score --> Raw["Raw Scores (N, 1)"]
-        Raw --> Softmax["Portfolio Softmax (Temperature)"]
-        Softmax --> Weights["Portfolio Weights (N)"]
-    end
-
-    subgraph Critic["Critic (Q-Function)"]
-        S2["State (N, T, F)"] --> Enc2["Shared Factor Encoder"]
-        Enc2 --> Emb2["Stock Embeddings (N, D)"]
-        Weights -.-> A_Input["Action Input (N)"]
-        
-        Emb2 --> Concat["Concat (Emb + Action)"]
-        A_Input --> Concat
-        
-        Concat --> Pool["Global Pooling (Deep Sets)"]
-        Pool --> Q["Q-Value (Scalar)"]
-    end
-```
+## 2. 아키텍처 (Architecture)![DDPG_Model_Architecture](..\ddpg\DDPG_Model_Architecture.png)
 
 ### 2.1 Actor (Policy Network)
+
 `src/models/ddpg/actor.py`
 
 Actor는 현재 시장 데이터를 받아 최적의 포트폴리오 비중을 출력합니다.
 
 - **Feature Integration (Concatenated)**:
-    - **Input**: `Prices`와 `Macro` 정보를 하나의 벡터로 결합(Concatenate)하여 사용.
-    - TGNN과 달리 별도의 인코더를 두지 않고, 전체 상태 공간($State Space$)을 통합적으로 해석하여 최적 행동(Action)을 결정.
+  - **Input**: `Prices`와 `Macro` 정보를 하나의 벡터로 결합(Concatenate)하여 사용.
+  - TGNN과 달리 별도의 인코더를 두지 않고, 전체 상태 공간($State Space$)을 통합적으로 해석하여 최적 행동(Action)을 결정.
 - **Global Net**: `Linear(N*TF)` -> `LayerNorm` -> `ReLU` -> `Linear` -> `Softmax`
 - **Constraints**:
-    - **Normalization**: `Sum(Weights) = 1.0`
+  - **Normalization**: `Sum(Weights) = 1.0`
 
 ### 2.2 Critic (Value Network)
+
 `src/models/ddpg/critic.py`
 
 Critic은 (상태, 행동) 쌍을 받아 해당 포트폴리오의 가치(Q-Value)를 평가합니다.
@@ -64,14 +42,16 @@ Critic은 (상태, 행동) 쌍을 받아 해당 포트폴리오의 가치(Q-Valu
 ## 3. 입력 및 출력 명세 (I/O Specification)
 
 ### Input Tensor
+
 - **Shape**: `[Batch_Size, Num_Stocks, Window_Size, Features]`
-    - 예: `[32, 10, 12, 5]` (32개 배치, 10개 종목, 12일 윈도우, 5개 지표)
+  - 예: `[32, 10, 12, 5]` (32개 배치, 10개 종목, 12일 윈도우, 5개 지표)
 - **Note**: `Num_Stocks` 차원은 학습 시와 추론 시 **달라도 무방합니다**. (Shared Weights & Deep Sets 구조)
 
 ### Output Tensor
+
 - **Weights**: `[Batch_Size, Num_Stocks]`
-    - 예: `[32, 10]`
-    - 각 배치의 종목별 투자 비중. `Sum(dim=1)`은 항상 1.0에 근사합니다.
+  - 예: `[32, 10]`
+  - 각 배치의 종목별 투자 비중. `Sum(dim=1)`은 항상 1.0에 근사합니다.
 
 ---
 
@@ -81,18 +61,18 @@ Critic은 (상태, 행동) 쌍을 받아 해당 포트폴리오의 가치(Q-Valu
 
 ```yaml
 data:
-  stock_universes: ["AAPL", "MSFT", ...]  # 학습할 유니버스 정의 (Test 시엔 달라도 됨)
+  stock_universes: ["AAPL", "MSFT", ...] # 학습할 유니버스 정의 (Test 시엔 달라도 됨)
 
 model:
   ddpg:
-    actor_lr: 0.0001    # Actor Learning Rate
-    critic_lr: 0.001    # Critic Learning Rate
-    gamma: 0.99         # Discount Factor
-    tau: 0.001          # Soft Update Ratio
-    batch_size: 64      # Mini-batch Size
+    actor_lr: 0.0001 # Actor Learning Rate
+    critic_lr: 0.001 # Critic Learning Rate
+    gamma: 0.99 # Discount Factor
+    tau: 0.001 # Soft Update Ratio
+    batch_size: 64 # Mini-batch Size
 
 training:
-  buffer_size: 10000    # Replay Buffer Capacity
+  buffer_size: 10000 # Replay Buffer Capacity
 ```
 
 ## 5. 재현성 (Reproducibility)
