@@ -13,7 +13,7 @@
 
 ## 2. 아키텍처 (Architecture)
 
-![TGNN_Model_Architecture](..\tgnn\TGNN_Mode_Architecutre.png)
+![TGNN 모델 구조](../../../../academic_papers/images/TGNN_Model_Architecture.png)
 
 ### 2.1 Main Pipeline (`model.TGNN`)
 

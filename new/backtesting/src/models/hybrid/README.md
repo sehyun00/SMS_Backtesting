@@ -18,7 +18,7 @@
 
 ## 2. 아키텍처 (Architecture)
 
-![Hybrid_Model_Architecture](..\hybrid\Hybrid_Model_Architecutre.png)
+![HYBRID 모델 구조](../../../../academic_papers/images/Hybrid_Model_Architecture.png)
 
 ---
 

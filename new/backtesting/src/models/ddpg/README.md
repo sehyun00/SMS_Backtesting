@@ -13,7 +13,9 @@
 
 ---
 
-## 2. 아키텍처 (Architecture)![DDPG_Model_Architecture](..\ddpg\DDPG_Model_Architecture.png)
+## 2. 아키텍처 (Architecture)
+
+![DDPG 모델 구조](../../../../academic_papers/images/DDPG_Model_Architecture.png)
 
 ### 2.1 Actor (Policy Network)
 
