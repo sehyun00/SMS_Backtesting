@@ -2,90 +2,100 @@
 
 ## 4.1 데이터셋 구성 (Dataset Description)
 
-본 연구에서는 2015년 1월부터 2024년 5월까지의 글로벌 주식 시장 데이터를 활용하였다. 포트폴리오 구성 종목은 한국인 투자자의 실제 거래 행태를 반영하기 위해 증권정보포털 SEIBro의 '주요국 외화주식 예탁결제현황' 데이터를 기반으로 선정하였다.
+본 연구에서는 2006년 1월부터 2025년까지의 글로벌 주식 시장 데이터를 활용하였다. 학습 기간(Train)은 2006–2020년, 테스트 기간(Test)은 2021–2025년으로 설정하였다. 포트폴리오 구성 종목은 S&P 500 지수의 구성 종목 중 GICS(Global Industry Classification Standard) 섹터 다각화 원칙에 따라 체계적으로 선정하였다.
 
 ### 4.1.1 종목 선정 방법론 (Stock Selection Methodology)
 
 포트폴리오 종목 선정은 다음의 절차를 통해 수행되었다.
 
-**(1) 거래량 기반 1차 선별**
+**(1) S&P 500 종목 자동 수집**
 
-SEIBro에서 제공하는 한국인 1년간 매수 종목별 TOP50 데이터를 수집하였다. 이 데이터는 실제 매수결제금액을 기준으로 정렬되어 있어, 시장에서 높은 유동성(liquidity)과 투자자 관심도를 반영한다 (Wu et al., 2021).
+Wikipedia의 S&P 500 구성 종목 리스트를 자동 크롤링하여 전체 후보군을 확보하였다. 각 종목의 GICS 섹터 및 세부 산업 정보는 크롤링 데이터와 yfinance API를 통해 교차 검증하였다.
 
-**(2) 산업군 다각화 기준 적용**
+**(2) Survivorship Bias 방지 필터링**
 
-포트폴리오의 위험 분산 효과를 극대화하기 위해, 서로 다른 산업군(sector)을 대표하는 10개 종목을 선정하였다. 이는 Moskowitz & Grinblatt(1999)의 산업군 기반 포트폴리오 전략과 Choueifaty & Coignard의 최대 다각화 이론을 기반으로 한다. 선정 기준은 다음과 같다:
+실험의 타당성을 확보하기 위해, 전체 실험 기간(2006–2025) 동안 상장이 유지된 종목만을 대상으로 하였다. 구체적으로, Train 기간(2006–2020)에 최소 1,000 거래일, Test 기간(2021–2025)에 최소 600 거래일의 데이터를 보유한 종목만 후보로 선정하였다.
 
-- 산업군 다양성: 4개 주요 섹터(Information Technology, Consumer Discretionary, Communication Services, Health Care)에 분산
-- 경기순환 균형: 경기순환적 섹터와 방어적 섹터를 균형있게 포함
-- 세부 산업 차별화: 각 종목이 서로 다른 세부 산업을 대표하도록 구성
+**(3) 섹터별 균등 추출**
 
-**(3) 최종 종목 리스트**
+포트폴리오의 위험 분산 효과를 극대화하기 위해, GICS 10개 섹터에서 각 1개 대표 종목을 균등하게 선정하였다. 이는 Moskowitz & Grinblatt(1999)의 산업군 기반 포트폴리오 전략과 Choueifaty & Coignard의 최대 다각화 이론에 기반한다. 선정 기준은 다음과 같다:
 
-위 절차를 통해 선정된 10개 종목은 Table 4와 같다.
+- 섹터 완전 다각화: GICS 10개 섹터(Industrials, Health Care, IT, Financials, Materials, Real Estate, Communication Services, Consumer Staples, Consumer Discretionary, Energy) 전체를 포함
+- 데이터 품질: 섹터 내 후보 중 데이터 행 수가 가장 풍부한 종목을 우선 선정
+- Disjoint Split: Train/Test 간 종목 중복을 원천 차단하여 정보 누출 방지
 
-| 티커 | 종목명 | 섹터 | 세부 산업 |
-| --- | --- | --- | --- |
-| TSLA | Tesla Inc | Consumer Discretionary | Electric Vehicles |
-| NVDA | Nvidia Corp | Information Technology | Semiconductors |
-| PLTR | Palantir Technologies | Information Technology | Data Analytics |
-| IONQ | IonQ Inc | Information Technology | Quantum Computing |
-| GOOGL | Alphabet Inc | Communication Services | Internet/Cloud |
-| AAPL | Apple Inc | Information Technology | Consumer Electronics |
-| META | Meta Platforms | Communication Services | Social Media |
-| UNH | UnitedHealth Group | Health Care | Healthcare Services |
-| MSFT | Microsoft Corp | Information Technology | Cloud/Software |
-| AMZN | Amazon.com Inc | Consumer Discretionary | E-commerce/Cloud |
+**(4) 최종 종목 리스트**
 
-**Table 4.** Selected 10 stocks based on sector diversification and liquidity criteria
+위 절차를 통해 선정된 10개 Test 종목은 Table 2와 같다.
 
-이러한 종목 구성은 섹터 간 평균 상관계수를 0.35 이하로 유지하여 분산 효과를 극대화하였으며, Evans & Archer(1968)가 제시한 최적 분산투자 종목 수(10~15개)의 범위 내에 있다. 또한 각 종목은 해당 산업군 내에서 매수결제금액 상위권에 위치하여 충분한 유동성을 확보하였다.
+| 티커 | 종목명 | 섹터 |
+| --- | --- | --- |
+| MMM | 3M Company | Industrials |
+| ABT | Abbott Laboratories | Health Care |
+| ACN | Accenture plc | Information Technology |
+| AFL | Aflac Inc | Financials |
+| APD | Air Products & Chemicals | Materials |
+| ARE | Alexandria Real Estate | Real Estate |
+| GOOGL | Alphabet Inc | Communication Services |
+| MO | Altria Group | Consumer Staples |
+| AMZN | Amazon.com Inc | Consumer Discretionary |
+| APA | APA Corporation | Energy |
+
+**Table 2.** S&P 500에서 GICS 섹터별 균등 추출된 10개 Test 종목
+
+이러한 종목 구성은 GICS 10개 섹터를 빠짐없이 포함하여 최대 수준의 섹터 다각화를 달성하였으며, Evans & Archer(1968)가 제시한 최적 분산투자 종목 수(10~15개)의 범위 내에 있다. 또한 Survivorship Bias 필터링을 통해 전체 실험 기간 동안 안정적으로 거래된 종목만을 포함하여 실험의 신뢰성을 확보하였다.
 
 ### 4.1.2 기타 데이터 구성 (Other Data Components)
 
 선정된 10개 종목에 대해 다음의 데이터를 수집하였다:
 
-- Yahoo Finance API: 일별 주가(OHLC), 거래량, 시가총액 등 기본 시장 데이터
-- FNGuide Financial DB: 재무정보(PBR, PER, ROE, ROA, Debt Ratio 등)
-- FRED (Federal Reserve Economic Data): 금리, 환율, 인플레이션, 경기선행지수 등 거시경제 지표
+- **Yahoo Finance API (`yfinance`)**: 일별 주가(OHLCV — Open, High, Low, Close, Volume) 데이터
+- **Kenneth French Data Library (`pandas-datareader`)**: Fama & French(2015)의 5요인(Mkt-RF, SMB, HML, RMW, CMA) 일별 팩터 수익률
 
-각 종목의 특징(feature)은 Fama & French(2015)의 5요인 모델(Market, Size, Value, Profitability, Investment)을 기반으로 설계하였으며, 총 2,300일의 일별 관측값으로 구성되었다.
+모델의 입력 특징은 두 가지 경로(Dual-Path)로 분리하여 구성하였다:
+
+| 경로 | 특징 | 개수 |
+| --- | --- | --- |
+| Local (Price) | Open, High, Low, Close, Volume | 5개 |
+| Global (Macro) | Mkt_RF, SMB, HML, RMW, CMA | 5개 |
+| **합계** | | **10개** |
+
+**Table 3.** Dual-Path 입력 특징 구성
+
+이러한 Dual-Path 구조는 종목별 가격 신호(Local)와 시장 전체 거시경제 팩터(Global)의 신호 희석(Signal Dilution)을 방지하기 위해 설계되었다. 또한 기술적 지표(Momentum 1M/3M/6M/12M)는 TGNN의 예측 대상(Label)으로 활용되었다.
 
 ## 4.2 데이터 전처리 (Data Preprocessing)
 
 데이터 품질을 보장하기 위해 다음의 전처리 절차를 수행하였다:
 
-**(1) 이상치 제거 (Outlier Removal):**
+**(1) 기술적 지표 생성 (Technical Indicator Engineering):**
 
-- 상·하위 0.5% 극단값을 제외하고, 비정상적 수익률·거래량을 제거하였다.
-
-**(2) 결측치 처리 (Missing Value Handling):**
-
-- 단기 결측(≤5일)은 선형 보간(linear interpolation)으로 보완하고, 장기 결측(>5일)은 해당 구간을 삭제하였다.
-
-**(3) 기술적 지표 생성 (Technical Indicator Engineering):**
-
-원시 OHLCV 데이터로부터 다음의 파생변수를 생성하여 모델의 입력 특징으로 활용하였다:
+원시 OHLCV 데이터로부터 다음의 파생변수를 생성하여 TGNN의 예측 레이블(Label)로 활용하였다:
 
 | 지표 | 산출 방법 | 목적 |
 | --- | --- | --- |
-| Momentum (1M, 3M, 6M, 12M) | 각각 20, 60, 120, 252 거래일 수익률 | 다중 시간 스케일의 추세 포착 |
+| Momentum (1M, 3M, 6M, 12M) | 각각 20, 60, 120, 252 거래일 수익률 | 다중 시간 스케일의 추세 포착 (예측 대상) |
 | Volatility | 20일 수익률 표준편차 × $\sqrt{252}$ (연율화) | 리스크 수준 정량화 |
 | RSI (14) | 14일 상대강도지수 | 과매수/과매도 판단 |
 | MACD (12, 26, 9) | 12일·26일 EMA 차이 및 9일 시그널 | 단기 모멘텀 전환 감지 |
 
-이러한 기술적 지표는 Fama-French 5-Factor(Mkt-RF, SMB, HML, RMW, CMA)와 병합되어 각 종목에 대해 총 15개의 입력 특징을 구성하였다.
+**Table 4.** TGNN 입력 기술적 지표 및 산출 방법
+
+**(2) Fama-French 팩터 병합:**
+
+Kenneth French Data Library에서 일별 Fama-French 5-Factor 데이터를 다운로드하여, 날짜 기준 Left Join으로 주가 데이터와 병합하였다. 공휴일 등으로 인한 결측값은 Forward Fill로 보완하였다.
+
+**(3) 결측치 처리 (Missing Value Handling):**
+
+슬라이딩 윈도우 생성 시, 특정 종목의 데이터가 윈도우 길이보다 부족한 경우 Zero Padding을 적용하였다. 또한 각 윈도우의 마지막 날짜에 거래 데이터가 존재하지 않는 종목은 Active Mask를 통해 학습 시 제외하여, 비활성 종목이 Ranking Loss에 영향을 미치지 않도록 처리하였다.
 
 **(4) 정규화 (Normalization):**
 
-- 가격 및 거래량: Min–Max 스케일링(0~1)
-- 재무지표: Z-score 정규화
-- 요인 점수(Factor Score): [-3, +3] 범위로 스케일링
+각 슬라이딩 윈도우 단위로 Robust Z-Score 정규화를 적용하였다. 구체적으로, 윈도우 내 전체 종목·시점의 평균($\mu$)과 표준편차($\sigma$)를 계산하여 $x' = (x - \mu) / (\sigma + \epsilon)$ ($\epsilon = 10^{-8}$) 변환을 수행하였다. 이 방식은 가격(Local)과 매크로(Global) 특징을 상대적으로 스케일링하여 신호 간 균형을 유지한다.
 
 **(5) 그래프 구축 (Graph Construction):**
 
-- 종목 간 피어슨 상관계수 $\rho \ge 0.35$인 경우 엣지 생성
-- 엣지 가중치 $w = |\rho| \times \text{Similarity}_{sector}$로 정의하였으며, 시점별 그래프를 TGNN 입력으로 생성하였다 (Wu et al., 2021).
+종목 간 관계를 표현하기 위해 GICS 섹터 기반 인접 행렬(Adjacency Matrix)을 생성하였다. 동일 섹터에 속하는 종목 쌍에는 가중치 $w = 1.0$, 이종 섹터 간에는 약한 연결($w = 0.5$)을 부여하며, 자기 연결(Self-loop, $w = 1.0$)을 포함하여 그래프가 완전 연결(Fully Connected)되도록 구성하였다. 이 그래프는 각 시점(Snapshot)별로 생성되어 TGNN의 공간적 관계 학습에 활용된다.
 
 **(6) 섹터 밸런싱 기반 데이터 분할 (Sector-Balanced Disjoint Split):**
 
@@ -115,6 +125,8 @@ SEIBro에서 제공하는 한국인 1년간 매수 종목별 TOP50 데이터를 
 | Epoch 수 | 800 |
 | Optimizer | Adam |
 
+**Table 5.** 모델 하이퍼파라미터 설정
+
 환경: Python 3.10 / PyTorch 2.2 / CUDA 12.3
 하드웨어: NVIDIA GPU (CUDA 지원)
 운영체제: Windows / Linux
@@ -137,6 +149,8 @@ SEIBro에서 제공하는 한국인 1년간 매수 종목별 TOP50 데이터를 
 | 예측 정확도(Prediction Accuracy) | MSE, RMSE, R² | TGNN 예측 및 임베딩 품질 평가 |
 | 리스크 조정 성과(Risk-adjusted Performance) | Sharpe Ratio, Sortino Ratio, CVaR, Omega | DDPG 정책의 리스크-보상 균형 평가 |
 
+**Table 6.** 성능 평가 지표 범주 및 목적
+
 **Sharpe Ratio**와 **Sortino Ratio**는 다음과 같이 정의된다:
 
 $$ \text{Sharpe Ratio} = \frac{R_p - R_f}{\sigma_p} $$
@@ -147,24 +161,30 @@ $$ \text{Sortino Ratio} = \frac{R_p - R_f}{\sigma_d} $$
 
 ## 4.5 비교 모델 (Baseline Models)
 
-제안된 하이브리드 AI DSS의 우수성을 검증하기 위해, 다음 네 가지 대표 모델을 비교 대상으로 설정하였다:
+제안된 하이브리드 AI DSS의 우수성을 검증하기 위해, 다음의 비교 대상을 설정하였다:
 
 | 모델 | 설명 | 특성 |
 | --- | --- | --- |
-| LSTM | 단일 시계열 기반 예측 모델 | 장기 의존성 학습에 적합하지만 관계 인식 불가 |
-| Transformer | Self-Attention 기반 시계열 예측 | 전역 의존성 학습 가능, 구조적 관계 반영 미흡 |
+| Benchmark (Buy & Hold) | 동일 비중 매입 후 보유 전략 | 패시브 전략 기준선 |
 | TGNN | 그래프 기반 관계 예측 모델 | 시장 구조 반영 가능, 정책 최적화 미포함 |
-| TGNN+DDPG (Proposed) | 하이브리드 DSS 모델 | 관계·정책·앙상블 최적화 통합 구조 |
+| DDPG | 강화학습 기반 정책 최적화 모델 | 정책 학습 가능, 종목 간 관계 인식 불가 |
+| TGNN+DDPG Hybrid (Proposed) | 하이브리드 DSS 모델 | 관계·정책·앙상블 최적화 통합 구조 |
+
+**Table 7.** 비교 대상 모델(Baseline) 구성
+
+각 모델은 Monthly, Quarterly, Semiannual, Annual의 4가지 리밸런싱 주기에서 독립적으로 평가하여, 주기별 성과 특성을 분석하였다.
 
 ## 4.6 검증 절차 및 강건성 평가 (Validation and Reliability Check)
 
-모델의 일반화 성능과 신뢰성을 검증하기 위해 시계열 교차검증(Time-Series Cross Validation)을 수행하였다.
+모델의 일반화 성능과 신뢰성을 검증하기 위해, 시간적 순서를 엄격히 준수하는 데이터 분할을 수행하였다.
 
-- 훈련(Train): 2015–2022년 데이터
-- 검증(Validation): 2023년
-- 테스트(Test): 2024–2025년
+- **학습(Train)**: 2006–2020년 데이터 (약 3,700 거래일)
+- **테스트(Test)**: 2021–2025년 데이터 (약 1,000 거래일)
+- **종목 분리**: Train/Test 간 Disjoint Split 적용 (섹터당 균등 배분, 종목 중복 없음)
 
-또한, 스트레스 테스트(Stress Testing)를 수행하여 코로나19 팬데믹(2020), 러시아-우크라이나 전쟁(2022) 등 급변 시장 구간에서도 모델이 안정적 리밸런싱 정책을 유지하는지 평가하였다. 특히 Seed Fixing을 적용한 상태에서 30회의 반복 실험을 수행하여 결과의 편차(Variance)가 통계적으로 유의미한 범위 내에 있음을 확인하였다.
+Train/Test 간 종목이 완전히 분리(Disjoint)되어 있어, 특정 종목에 대한 과적합(Overfitting)이 아닌 시장 구조 자체를 학습했는지를 평가할 수 있다.
+
+또한, 테스트 기간에는 코로나19 팬데믹 이후 회복기(2021), 러시아-우크라이나 전쟁(2022), 금리 인상기(2023) 등 다양한 시장 국면이 포함되어 있어, 모델의 강건성을 자연스럽게 검증할 수 있는 환경을 제공한다.
 
 ## 4.7 DSS 통합 및 피드백 구조 (Integration into DSS)
 

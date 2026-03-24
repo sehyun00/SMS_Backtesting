@@ -4,7 +4,7 @@
 
 본 연구는 관계 학습(Relational Learning)과 정책 최적화(Policy Optimization)를 통합한 하이브리드 인공지능 기반 의사결정지원시스템(AI-based Decision Support System, AI-DSS)을 제안한다.
 
-제안된 프레임워크는 Temporal Graph Neural Network (TGNN)와 Deep Deterministic Policy Gradient (DDPG) 두 모듈을 결합한 하이브리드 에이전트(Hybrid Agent) 구조를 기반으로 하며, 예측-결정-실행의 연속 피드백 루프를 형성한다. AI DSS의 전체 구조는 그림 1과 같이 데이터 수집-관계 학습-정책 최적화-비용 최소화-의사결정 피드백의 순환 구조로 구성된다.
+제안된 프레임워크는 Temporal Graph Neural Network (TGNN)와 Deep Deterministic Policy Gradient (DDPG) 두 모듈을 결합한 하이브리드 에이전트(Hybrid Agent) 구조를 기반으로 하며, 예측-결정-실행의 연속 피드백 루프를 형성한다. AI DSS의 전체 구조는 Figure 1과 같이 데이터 수집-관계 학습-정책 최적화-비용 최소화-의사결정 피드백의 순환 구조로 구성된다.
 
 이 프레임워크는 단순한 데이터 분석을 넘어 시장의 구조적 상호작용을 학습하고, 강화학습 기반 의사결정을 자동화하며, DSS 내 실시간 정책 피드백을 가능하게 한다. 특히 본 연구에서는 기존의 단일 통합 모델 구조를 개선하여, 독립적인 DDPG와 TGNN 인스턴스를 조합(Composition)하고 리밸런싱 주기에 따라 가중치를 동적으로 조절하는 Horizon-Aware Ensemble 메커니즘을 도입하였다.
 
@@ -12,7 +12,9 @@
 
 본 연구의 핵심 기여 중 하나는 자산 무관형(Asset-Agnostic) 구조의 도입이다. 기존 포트폴리오 모델들이 고정된 수의 주식(N)에 대해 학습하여 유니버스 변경 시 재학습이 필요한 것과 달리, 제안된 모델은 가변적인 시장 상황(Variable N)에 유연하게 대응한다. 이는 Shared Encoder(공유 가중치)와 Deep Sets(집합 연산) 기술을 적용하여 달성된다.
 
-![Proposed Framework Architecture](../images/04_Methodlogy.drawio.png)
+![Figure 1. Proposed Hybrid AI-DSS Framework Architecture](../images/04_Methodlogy.drawio.png)
+
+**Figure 1.** Proposed Hybrid AI-DSS Framework Architecture
 
 ## 3.2 관계 학습 모듈: Temporal Graph Neural Network (TGNN)
 
@@ -33,11 +35,6 @@ $$
 
 여기서 $\tilde{A} = A + I$는 자기 연결이 추가된 인접행렬, $\tilde{D}$는 차수행렬이다. 본 모델은 안정적 학습을 위해 잔차 연결(Residual Connection)과 Layer Normalization을 적용하였다.
 
-<<<<<<< HEAD
-### Multi-Head Prediction
-
-기존 단일 예측 구조를 개선하여, 4가지 기간(1개월, 3개월, 6개월, 12개월)의 가격 모멘텀을 동시에 예측하는 멀티 태스크(Multi-Task) 구조를 채택하였다. 이를 통해 모델은 단기적 변동과 장기적 추세를 동시에 고려한 강건한(Robust) 임베딩을 학습한다.
-=======
 ### Multi-Head Prediction & Loss Function
 
 4가지 기간(1개월, 3개월, 6개월, 12개월)의 가격 모멘텀을 동시에 예측하는 멀티 태스크(Multi-Task) 구조를 채택하였다. 손실 함수는 절대 오차와 상대 순위를 모두 고려한 복합 손실을 사용한다:
@@ -45,13 +42,10 @@ $$
 $$ \mathcal{L} = \alpha \cdot \mathcal{L}_{MSE} + \beta \cdot \mathcal{L}_{Ranking} $$
 
 여기서 $\alpha = 0.7$, $\beta = 0.3$이며, Ranking Loss는 "A가 B보다 수익률이 높으면, 예측값도 A > B여야 한다"는 쌍별 순위를 수식화한다.
->>>>>>> e865ac537841776db4c6386e5c3c23fdac931c32
 
 ## 3.3 정책 학습 모듈: Deep Deterministic Policy Gradient (DDPG)
 
 정책 학습 모듈은 자산 무관형(Asset-Agnostic) 강화학습을 수행한다.
-<<<<<<< HEAD
-=======
 
 1.  **SharedFactorEncoder**: 개별 종목의 시계열 특징을 처리하는 공유 인코더(Shared MLP)를 사용하여, 종목 수(N)에 관계없이 동일한 파라미터로 특징을 추출한다.
 2.  **ScoreHead & Portfolio Softmax**: 추출된 특징으로부터 점수를 계산하고, **Temperature-scaled Softmax**를 통해 합이 1인 비중을 생성한다. Temperature 파라미터($\tau = 3.0$)는 포트폴리오 분산도를 조절하며, 높은 값은 균등 배분에 가까운 비중을, 낮은 값은 집중 투자를 유도한다.
@@ -59,11 +53,6 @@ $$ \mathcal{L} = \alpha \cdot \mathcal{L}_{MSE} + \beta \cdot \mathcal{L}_{Ranki
 $$ W_i = \frac{\exp(s_i / \tau)}{\sum_{j=1}^{N} \exp(s_j / \tau)} $$
 
 3.  **Deep Sets Critic**: Critic 네트워크는 상태-행동 쌍(State-Action Pair)을 평가할 때 Deep Sets 구조를 사용하여, 포트폴리오 크기가 변해도 재학습 없이 Q-value를 추정한다.
->>>>>>> e865ac537841776db4c6386e5c3c23fdac931c32
-
-1. **SharedFactorEncoder**: 개별 종목의 시계열 특징을 처리하는 공유 인코더(Shared MLP)를 사용하여, 종목 수(N)에 관계없이 동일한 파라미터로 특징을 추출한다.
-2. **ScoreHead & Softmax**: 추출된 특징으로부터 점수를 계산하고, Softmax(Temperature 적용)를 통해 합이 1인 비중을 생성한다. 이 과정은 입력 종목 수 N에 따라 자동으로 확장된다.
-3. **Deep Sets Critic**: Critic 네트워크는 상태-행동 쌍(State-Action Pair)을 평가할 때 Deep Sets 구조를 사용한다. 개별 종목의 상태와 행동을 임베딩한 후 Global Mean Pooling을 통해 전체 포트폴리오 수준의 Q-value를 추정하므로, 포트폴리오 크기가 변해도 재학습 없이 평가 가능하다.
 
 $$
 Q(S, A) = \rho \left( \sum_{i=1}^{N} \phi(s_i, a_i) \right)
@@ -77,11 +66,7 @@ $$
 
 ### 3.4.1 Horizon-Aware Dynamic Alpha
 
-<<<<<<< HEAD
-본 연구는 TGNN(예측 기반)과 DDPG(정책 기반)의 기여도를 동적으로 조절하기 위해 **Horizon Embedding**을 도입하였다. 리밸런싱 주기(Horizon) 정보를 임베딩 벡터로 변환하여 앙상블 네트워크에 주입함으로써, 단기 리밸런싱(Monthly)에서는 예측 정확도가 높은 TGNN의 비중을, 장기 리밸런싱(Annual)에서는 리스크 관리에 강한 DDPG의 비중을 높이는 방식으로 최적화된다.
-=======
 본 연구는 TGNN(예측 기반)과 DDPG(정책 기반)의 기여도를 동적으로 조절하기 위해 **Horizon Embedding**을 도입하였다. 리밸런싱 주기(Horizon) 정보(0: Monthly, 1: Quarterly, 2: Semiannual, 3: Annual)를 임베딩 벡터로 변환하여 앙상블 네트워크에 주입한다.
->>>>>>> e865ac537841776db4c6386e5c3c23fdac931c32
 
 최종 포트폴리오 비중 $W_{final}$은 다음과 같이 계산된다:
 
@@ -97,3 +82,5 @@ $$
 | DDPG        | 정책 최적화 | Asset-Agnostic (Shared Weights) | 가변 유니버스 대응 및 최적화    |
 | Ensemble    | 통합 제어   | Horizon-Aware Dynamic Alpha     | 투자 주기에 따른 최적 모델 조합 |
 | 통합 시스템 | DSS 운영    | Flask–Spring–React 구조         | 실시간 피드백 & XAI             |
+
+**Table 1.** 하이브리드 AI DSS 모듈별 역할 및 핵심 기술 요약

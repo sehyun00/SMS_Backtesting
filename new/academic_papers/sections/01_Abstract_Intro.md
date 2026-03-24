@@ -10,7 +10,7 @@ JoongHyun Park, Sehyun Kim, Junghyun Back, Hamin Kim, Kyungsik Lee. Hyun Lee
 
 제안된 시스템은 Temporal Graph Neural Network (TGNN)와 Deep Deterministic Policy Gradient (DDPG)를 Horizon-Aware Dynamic Ensemble 메커니즘으로 통합하여 포트폴리오 리밸런싱(Portfolio Rebalancing) 문제를 해결한다. 특히 본 연구는 단순한 성과 향상을 넘어, AI 의사결정의 재현성(Reproducibility)과 신뢰성(Reliability)을 보장하기 위한 결정론적(Deterministic) 알고리즘과 재현성 프로토콜을 도입하였다.
 
-10년간의 KOSPI 및 S&P500 데이터를 활용한 실험 결과, 제안된 Hybrid 모델은 **장기 리밸런싱 주기(Quarterly, Semiannual, Annual)에서 Benchmark를 일관되게 상회**하였으며, 특히 Annual 주기에서 CAGR 9.28%를 달성하였다. DDPG(Annual)가 최고 CAGR 10.41%를 기록했지만 주기별 성과 편차가 커서 일부 구간에서 Benchmark를 하회한 반면, Hybrid 모델은 **장기 투자 전략에 적합한 안정적 성과**를 보여 학술적 가치를 입증하였다. 또한 Flask 기반 AI 서버와 Spring–React 사용자 인터페이스를 통합하여 실시간 DSS 환경을 구현하였으며, TGNN Attention 기반 설명가능성(Explainability) 기법을 통해 모델의 의사결정 과정을 투명하게 검증하였다.
+S&P 500 구성 종목을 대상으로 약 19년간(2006–2025)의 데이터를 활용한 실험 결과, 제안된 Hybrid 모델은 **장기 리밸런싱 주기(Quarterly, Semiannual, Annual)에서 Benchmark를 일관되게 상회**하였으며, 특히 Annual 주기에서 CAGR 9.28%를 달성하였다. DDPG(Annual)가 최고 CAGR 10.41%를 기록했지만 주기별 성과 편차가 커서 일부 구간에서 Benchmark를 하회한 반면, Hybrid 모델은 **장기 투자 전략에 적합한 안정적 성과**를 보여 학술적 가치를 입증하였다. 또한 Flask 기반 AI 서버와 Spring–React 사용자 인터페이스를 통합하여 실시간 DSS 환경을 구현하였으며, TGNN Attention 기반 설명가능성(Explainability) 기법을 통해 모델의 의사결정 과정을 투명하게 검증하였다.
 
 본 연구는 예측 중심의 기존 DSS를 넘어, 관계 인식형(Structure-Aware)·재현 가능한(Reproducible)·설명 가능한(Explainable) 지능형 의사결정지원시스템의 새로운 표준을 제시한다.
 
@@ -67,7 +67,7 @@ AI DSS 관련 최신 연구는 크게 두 가지 방향으로 발전하고 있�
 2.  DDPG를 통해 포트폴리오 비중 조정 정책을 강화학습 기반으로 최적화하며,
 3.  Deterministic Algorithm 및 Seed Fixing을 통해 실험의 완전한 재현성을 보장한다.
 
-본 연구는 한국인 투자자의 실제 매수 데이터를 기반으로 10개 대표 종목을 선정하여 실험을 수행하였다. 종목 선정은 SEIBro의 거래량 데이터와 산업군 다각화 원칙을 결합하여, 실증성과 일반화 가능성을 동시에 확보하였다.
+본 연구는 S&P 500 구성 종목 중 GICS 섹터별 대표 종목을 1개씩 추출하여 10개 종목으로 실험을 수행하였다. 종목 선정 시 Survivorship Bias를 방지하기 위해 실험 전체 기간(2006–2025) 동안 상장이 유지된 종목만을 대상으로 하였으며, 섹터 다각화를 통해 특정 산업군에 편중되지 않는 일반화 가능한 포트폴리오를 구성하였다.
 
 이를 통해 본 연구는 다음과 같은 기여를 한다:
 
