@@ -2,7 +2,7 @@
 
 A Hybrid AI-Based Decision Support Framework Integrating Temporal Graph Neural Network and Reinforcement Learning for Portfolio Rebalancing
 
-JoongHyun Park, Sehyun Kim, Junghyun Back, Hamin Kim, Kyungsik Lee. Hyun Lee
+JoongHyun Park, Sehyun Kim, Junghyun Back, Hamin Kim, Kyungsik Lee, Hyun Lee
 
 ## Abstract
 
@@ -52,9 +52,9 @@ AI DSS 관련 최신 연구는 크게 두 가지 방향으로 발전하고 있�
 
 이러한 발전에도 불구하고 다음과 같은 한계가 여전히 존재한다.
 
-1.  대부분의 연구가 모델의 성능 극대화에 치중하여, 실험 결과의 재현성(Reproducibility)과 신뢰성 검증을 간과하였다.
-2.  기존 DSS는 AI 모델을 예측 모듈로만 활용하여 의사결정의 상호작용 구조(예: 종목 간 관계)를 반영하지 못했다.
-3.  강화학습 기반 DSS 연구들은 예측 모듈과 정책 모듈을 독립적으로 운용하여, 시장 구조 학습과 포트폴리오 최적화를 투자 주기(Horizon)에 따라 동적으로 결합하는 앙상블 메커니즘이 부재하였다.
+1. 대부분의 연구가 모델의 성능 극대화에 치중하여, 실험 결과의 재현성(Reproducibility)과 신뢰성 검증을 간과하였다.
+2. 기존 DSS는 AI 모델을 예측 모듈로만 활용하여 의사결정의 상호작용 구조(예: 종목 간 관계)를 반영하지 못했다.
+3. 강화학습 기반 DSS 연구들은 예측 모듈과 정책 모듈을 독립적으로 운용하여, 시장 구조 학습과 포트폴리오 최적화를 투자 주기(Horizon)에 따라 동적으로 결합하는 앙상블 메커니즘이 부재하였다.
 
 따라서, 관계 학습(Relationship Learning), 정책 학습(Policy Optimization)뿐만 아니라 신뢰할 수 있는 재현성(Reproducibility)을 갖춘 통합 AI DSS 프레임워크의 필요성이 제기된다.
 
@@ -63,9 +63,10 @@ AI DSS 관련 최신 연구는 크게 두 가지 방향으로 발전하고 있�
 본 연구는 위의 한계를 해결하기 위해, Temporal Graph Neural Network (TGNN)와 Deep Deterministic Policy Gradient (DDPG) 알고리즘을 통합하고, 엄격한 재현성 프로토콜을 적용한 신뢰할 수 있는 하이브리드 AI DSS를 제안한다.
 
 이 시스템은 다음 세 단계로 구성된다:
-1.  TGNN을 통해 시장 내 관계 구조를 학습하고,
-2.  DDPG를 통해 포트폴리오 비중 조정 정책을 강화학습 기반으로 최적화하며,
-3.  Deterministic Algorithm 및 Seed Fixing을 통해 실험의 완전한 재현성을 보장한다.
+
+1. TGNN을 통해 시장 내 관계 구조를 학습하고,
+2. DDPG를 통해 포트폴리오 비중 조정 정책을 강화학습 기반으로 최적화하며,
+3. Deterministic Algorithm 및 Seed Fixing을 통해 실험의 완전한 재현성을 보장한다.
 
 본 연구는 S&P 500 구성 종목 중 GICS 섹터별 대표 종목을 1개씩 추출하여 10개 종목으로 실험을 수행하였다. 종목 선정 시 Survivorship Bias를 방지하기 위해 실험 전체 기간(2006–2025) 동안 상장이 유지된 종목만을 대상으로 하였으며, 섹터 다각화를 통해 특정 산업군에 편중되지 않는 일반화 가능한 포트폴리오를 구성하였다.
 
