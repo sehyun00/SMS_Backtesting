@@ -7,7 +7,7 @@ description: 디렉토리 분석 기반 README.md 및 연구 문서(docs/) 동�
 이 워크플로우는 소스 코드를 분석하여 `README.md`를 생성하고, `docs/` 폴더 내의 연구 노트가 실제 코드 구현과 일치하는지 확인하여 업데이트합니다.
 
 ## 전제 조건 (Prerequisites)
-1.  **필수 스킬 로드**: `view_file .agent/skills/research_code.md`
+1.  **필수 스킬 로드**: `view_file .agent/skills/research-code/SKILL.md`
 
 ## 단계 (Steps)
 

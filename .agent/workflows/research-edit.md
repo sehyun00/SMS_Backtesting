@@ -8,7 +8,7 @@ description: research_code 스킬을 준수하며 코드를 수정/리팩토링�
 ## 전제 조건 (Prerequisites)
 
 1. **필수 스킬 로드**: 작업 시작 전 반드시 `research_code` 스킬을 확인해야 합니다.
-   - `view_file .agent/skills/research_code.md`
+   - `view_file .agent/skills/research-code/SKILL.md`
 
 ## 단계 (Steps)
 
