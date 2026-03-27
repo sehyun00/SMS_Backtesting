@@ -6,21 +6,21 @@
 
 Table 8은 각 모델의 리밸런싱 주기에 따른 주요 재무 성과 지표(CAGR, Sharpe Ratio, MDD, Total Return)를 보여준다.
 
-| Model               | Period               |        CAGR (%) |   Sharpe Ratio |         MDD (%) | Total Return (%) |
-| :------------------ | :------------------- | --------------: | -------------: | --------------: | ---------------: |
-| **Benchmark** | -                    |            6.35 |           0.25 |           22.47 |            27.35 |
-| **DDPG**      | Monthly              |            7.58 |           0.28 |           27.59 |            33.26 |
-|                     | Quarterly            |            8.45 |           0.31 |           30.76 |            37.55 |
-|                     | Semiannual           |            6.23 |           0.21 |           26.09 |            26.81 |
-|                     | **Annual**     | **10.41** | **0.42** |           24.41 |  **47.56** |
-| **TGNN**      | Monthly              |            3.24 |           0.06 |           25.35 |            13.33 |
-|                     | Quarterly            |            4.36 |           0.13 |           21.17 |            18.27 |
-|                     | **Semiannual** |  **8.38** | **0.35** | **22.07** |  **37.16** |
-|                     | Annual               |            2.65 |           0.03 |           25.98 |            10.82 |
-| **Hybrid**    | Monthly              |            5.90 |           0.20 |           27.06 |            25.26 |
-| (Proposed)          | Quarterly            |            8.07 |           0.31 |           25.83 |            35.63 |
-|                     | Semiannual           |            8.61 |           0.33 |           27.05 |            38.31 |
-|                     | Annual               |            9.28 |           0.36 |           25.15 |            41.73 |
+| Model         | Period         |  CAGR (%) | Sharpe Ratio |   MDD (%) | Total Return (%) |
+| :------------ | :------------- | --------: | -----------: | --------: | ---------------: |
+| **Benchmark** | -              |      6.35 |         0.25 |     22.47 |            27.35 |
+| **DDPG**      | Monthly        |      7.58 |         0.28 |     27.59 |            33.26 |
+|               | Quarterly      |      8.45 |         0.31 |     30.76 |            37.55 |
+|               | Semiannual     |      6.23 |         0.21 |     26.09 |            26.81 |
+|               | **Annual**     | **10.41** |     **0.42** |     24.41 |        **47.56** |
+| **TGNN**      | Monthly        |      3.24 |         0.06 |     25.35 |            13.33 |
+|               | Quarterly      |      4.36 |         0.13 |     21.17 |            18.27 |
+|               | **Semiannual** |  **8.38** |     **0.35** | **22.07** |        **37.16** |
+|               | Annual         |      2.65 |         0.03 |     25.98 |            10.82 |
+| **Hybrid**    | Monthly        |      5.90 |         0.20 |     27.06 |            25.26 |
+| (Proposed)    | Quarterly      |      8.07 |         0.31 |     25.83 |            35.63 |
+|               | Semiannual     |      8.61 |         0.33 |     27.05 |            38.31 |
+|               | Annual         |      9.28 |         0.36 |     25.15 |            41.73 |
 
 **Table 8.** Comprehensive Performance Analysis by Rebalancing Period (Test Period: 2021–2025)
 
@@ -40,12 +40,12 @@ Table 8은 각 모델의 리밸런싱 주기에 따른 주요 재무 성과 지�
 
 본 연구에서 주목할 점은 Hybrid 모델의 **성능 일관성(Consistency)**이다. Table 9는 각 모델의 평균 성과를 분석한 결과이다.
 
-| Model     |   Avg CAGR (%) |     Avg Sharpe | Avg MDD (%) | Consistency             |
-| :-------- | -------------: | -------------: | ----------: | :---------------------- |
-| DDPG      |           8.17 |           0.31 |       27.22 | ⚠️ 편차 큼            |
-| Hybrid    | **7.97** | **0.30** |       26.27 | ✅**일관성 높음** |
-| TGNN      |           4.66 |           0.14 |       23.65 | ❌ 저조                 |
-| Benchmark |           6.35 |           0.25 |       22.47 | -                       |
+| Model     | Avg CAGR (%) | Avg Sharpe | Avg MDD (%) | Consistency       |
+| :-------- | -----------: | ---------: | ----------: | :---------------- |
+| DDPG      |         8.17 |       0.31 |       27.22 | ⚠️ 편차 큼        |
+| Hybrid    |     **7.97** |   **0.30** |       26.27 | ✅**일관성 높음** |
+| TGNN      |         4.66 |       0.14 |       23.65 | ❌ 저조           |
+| Benchmark |         6.35 |       0.25 |       22.47 | -                 |
 
 **Table 9.** Average Performance Comparison
 
@@ -55,9 +55,7 @@ DDPG가 평균 CAGR(8.17%)에서 근소하게 앞서지만, **Hybrid 모델은 �
 
 ## 5.3 DSS 통합 및 설명가능성 (System Integration and Explainability)
 
-제안된 AI DSS는 **Flask–Spring–React 통합 아키텍처**를 기반으로 구현되었으며, 모델 출력(리밸런싱 비중, 리스크 경고, 거래 제안 등)은 **REST API**를 통해 대시보드에 실시간 반영된다.
-
-![Figure 4. Hybrid Model Portfolio Performance and Weight Allocation Results](../images/fig_hybrid_results.png)
+제안된 AI DSS는 **Flask–Spring–React 통합 아키텍처**를 기반으로 구현되었으며, 모델 출력(리밸런싱 비중, 리스크 경고, 거래 제안 등)은 REST API를 통해 x ms의 평균 추론 속도로 대시보드에 실시간 반영된다.![Figure 4. Hybrid Model Portfolio Performance and Weight Allocation Results](../images/fig_hybrid_results.png)
 
 **Figure 4.** Hybrid Model Portfolio Performance and Weight Allocation Results
 

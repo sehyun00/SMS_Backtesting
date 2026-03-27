@@ -47,18 +47,20 @@ $$ \mathcal{L} = \alpha \cdot \mathcal{L}_{MSE} + \beta \cdot \mathcal{L}_{Ranki
 
 정책 학습 모듈은 자산 무관형(Asset-Agnostic) 강화학습을 수행한다.
 
-1.  **SharedFactorEncoder**: 개별 종목의 시계열 특징을 처리하는 공유 인코더(Shared MLP)를 사용하여, 종목 수(N)에 관계없이 동일한 파라미터로 특징을 추출한다.
-2.  **ScoreHead & Portfolio Softmax**: 추출된 특징으로부터 점수를 계산하고, **Temperature-scaled Softmax**를 통해 합이 1인 비중을 생성한다. Temperature 파라미터($\tau = 3.0$)는 포트폴리오 분산도를 조절하며, 높은 값은 균등 배분에 가까운 비중을, 낮은 값은 집중 투자를 유도한다.
+1.  **Asset-Independent Representation Learning**: 주식 시장은 시간이 지남에 따라 유니버스에 편입되는 자산의 수(N)가 가변적이므로 고정된 차원의 네트워크 처리가 어렵다. 본 연구는 이러한 상태 공간의 비고정성을 극복하기 위해, 가중치 공유(Weight Sharing) 기반의 공유 신경망(Shared MLP)을 도입하였다. 이를 통해 개별 자산의 시계열은 자산 독립적인 공통 잠재 공간(Latent Space)으로 투영되며, 에이전트는 특정 자산에 고착 및 과적합(Overfitting)되지 않고 보편적 시장 동학(Universal Market Dynamics)을 학습할 수 있다.
+2.  **Continuous Policy Distribution and Entropy Regulation**: 강화학습 에이전트의 정책(Policy) 행동은 자본 제약 조건($\sum W_i = 1, W_i \ge 0$)을 만족하는 연속적 포트폴리오 비중이어야 한다. 제안 모델은 잠재 표상으로부터 각 자산의 상대적 투자 매력도를 스칼라 값으로 산출한 후, Temperature-scaled Softmax 함수를 통해 정책 분포($W_i$)를 형성한다. 여기서 온도 파라미터($\tau = 3.0$)는 정책의 엔트로피(Entropy)를 제어하는 정규화(Regularization) 기제로 작용하며, 지식 탐색(Exploration)과 수확(Exploitation) 간의 수학적 균형을 맞춰 포트폴리오의 분산도를 제어한다.
 
-$$ W_i = \frac{\exp(s_i / \tau)}{\sum_{j=1}^{N} \exp(s_j / \tau)} $$
+$$ W*i = \frac{\exp(s_i / \tau)}{\sum*{j=1}^{N} \exp(s_j / \tau)} $$
 
-3.  **Deep Sets Critic**: Critic 네트워크는 상태-행동 쌍(State-Action Pair)을 평가할 때 Deep Sets 구조를 사용하여, 포트폴리오 크기가 변해도 재학습 없이 Q-value를 추정한다.
+3.  **Permutation-Invariant Portfolio Value Estimation**: 통합 포트폴리오의 예상 가치(Q-value)를 평가하는 Critic 신경망은, 포트폴리오 구성 자산의 입력 순서가 변경되더라도 동일한 가치를 산출해야 하는 순열 불변성(Permutation-Invariance)을 요구한다. 이를 수학적으로 보장하기 위해 본 연구는 집합 연산에 기반한 **Deep Sets** 아키텍처(Zaheer et al., 2017)를 채택하였다. 로컬 수준에서 평가된 개별 특징($\phi$)을 전역 변수로 합산(Aggregation)하고 글로벌 신경망($\rho$)을 통해 최종 가치를 평가하므로, 포트폴리오 크기가 변하더라도 모델 구조의 변경 없이 일관된 시스템 가치 추정이 보장된다.
 
 $$
 Q(S, A) = \rho \left( \sum_{i=1}^{N} \phi(s_i, a_i) \right)
 $$
 
 여기서 $\phi$는 로컬 인코더, $\rho$는 글로벌 Q-Head이다.
+
+_본 연구의 실제 시스템 구현 시, 위에서 설명된 세 가지 핵심 모듈은 전체 시스템 통합을 위해 각각 `SharedFactorEncoder`, `ScoreHead`, `DeepSetsCritic` 클래스로 명명되어 개발되었다._
 
 ## 3.4 Hybrid Alpha & System Integration
 
