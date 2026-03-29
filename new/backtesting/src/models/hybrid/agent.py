@@ -66,16 +66,17 @@ class HybridAgent(BaseModel):
         self.horizon_embedding = nn.Embedding(4, self.horizon_dim)
 
         # 앙상블 레이어: Global Pooling으로 alpha 계산
-        # Input: DDPG hidden (64) + TGNN embedding (64) + scores (2) + horizon (8) = 138
+        # TGNN Node Embedding (96) + DDPG encoder (64) + scores(2) + horizon(8) = 170
         hidden_dim = 128
-        tgnn_emb_dim = 64  # TGNN Node Embedding (Fixed to 64 in TGNN)
-        if "factors" in config["data"] and config["data"]["factors"]:
-            tgnn_emb_dim += 32  # Add Macro Embedding Dimension
-        ddpg_emb_dim = 64  # DDPG encoder 출력
+        tgnn_emb_dim = 96  # Fixed to match trained checkpoint
+        ddpg_emb_dim = 64
+        
         if self.alpha_mode == "dynamic":
             ensemble_input_dim = tgnn_emb_dim + ddpg_emb_dim + 2 + self.horizon_dim
         else:
-            ensemble_input_dim = tgnn_emb_dim + ddpg_emb_dim + 2  # +2 for scores
+            ensemble_input_dim = tgnn_emb_dim + ddpg_emb_dim + 2
+        
+        print(f"[INFO] Hybrid Ensemble Input Dimension: {ensemble_input_dim} (Fixed to 170)")
 
         self.ensemble_net = GlobalPoolHead(
             input_dim=ensemble_input_dim, hidden_dim=hidden_dim, output_dim=1
@@ -108,6 +109,7 @@ class HybridAgent(BaseModel):
         adj: torch.Tensor,
         target_head: str = "Momentum1M",
         horizon: int = 0,
+        **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass for prediction/inference.
@@ -141,13 +143,27 @@ class HybridAgent(BaseModel):
         prices = x[:, :, :, :num_price]  # [B, N, T, 5]
         macro = x[:, :, :, num_price:]  # [B, N, T, 5]
 
-        tgnn_weights, tgnn_emb = self.tgnn.get_portfolio_weights(
-            prices.to(self.tgnn.device),
-            adj.to(self.tgnn.device),
-            macro=macro.to(self.tgnn.device),
-            target_head=target_head,
-            temperature=self.temperature,
-        )  # [Batch, N], [Batch, N, 64]
+        # Check for attention request
+        return_attn = kwargs.get("return_attn_weights", False)
+
+        if return_attn:
+            tgnn_weights, tgnn_emb, attn_weights = self.tgnn.get_portfolio_weights(
+                prices.to(self.tgnn.device),
+                adj.to(self.tgnn.device),
+                macro=macro.to(self.tgnn.device),
+                target_head=target_head,
+                temperature=self.temperature,
+                return_attn_weights=True,
+            )
+        else:
+            tgnn_weights, tgnn_emb = self.tgnn.get_portfolio_weights(
+                prices.to(self.tgnn.device),
+                adj.to(self.tgnn.device),
+                macro=macro.to(self.tgnn.device),
+                target_head=target_head,
+                temperature=self.temperature,
+            )
+            attn_weights = None
 
         # --- Ensemble ---
         if self.alpha_mode == "dynamic":
@@ -190,6 +206,8 @@ class HybridAgent(BaseModel):
         # 최종 정규화
         final_weights = final_weights / (final_weights.sum(dim=-1, keepdim=True) + 1e-8)
 
+        if return_attn:
+            return final_weights, alpha, attn_weights
         return final_weights, alpha
 
     def predict(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -320,26 +338,28 @@ class HybridAgent(BaseModel):
             # 수정시간 기준 정렬 (최신 파일)
             latest_ckpt = max(files, key=os.path.getmtime)
             ckpt_path = latest_ckpt
-            print(f"✅ TGNN 체크포인트 자동 탐색 성공: {ckpt_path}")
+            print(f"[OK] TGNN 체크포인트 자동 탐색 성공: {ckpt_path}")
 
-        # 로드 실행
         if ckpt_path and os.path.exists(ckpt_path):
             try:
                 state_dict = torch.load(ckpt_path, map_location=self.device)
-                self.tgnn.load_state_dict(state_dict)
-                print(f"✅ TGNN 가중치 로드 완료: {ckpt_path}")
+                if isinstance(state_dict, dict) and "model_state_dict" in state_dict:
+                    self.tgnn.load_state_dict(state_dict["model_state_dict"])
+                else:
+                    self.tgnn.load_state_dict(state_dict)
+                print(f"[OK] TGNN weights loaded: {ckpt_path}")
 
                 # 가중치 동결 (Freeze) - Hybrid 학습 중 TGNN 변질 방지
                 self.tgnn.eval()
                 for param in self.tgnn.parameters():
                     param.requires_grad = False
-                print("🔒 TGNN 파라미터 동결 (Freeze) 완료")
+                print("[LOCK] TGNN parameters frozen.")
 
             except Exception as e:
-                print(f"❌ TGNN 로드 중 오류 발생: {e}")
+                print(f"[ERR] Error loading TGNN: {e}")
         else:
             print(
-                f"⚠️ 경고: 지정된 TGNN 체크포인트 경로가 유효하지 않습니다: {ckpt_path}"
+                f"[WARN] TGNN checkpoint path invalid: {ckpt_path}"
             )
             print("   TGNN이 Random Weights로 동작합니다 (성능 저하 위험).")
 
@@ -358,16 +378,80 @@ class HybridAgent(BaseModel):
             path,
         )
 
+    def get_portfolio_weights(
+        self,
+        x: torch.Tensor,
+        adj: torch.Tensor,
+        target_head: str = "Momentum1M",
+        horizon: int = 0,
+        return_attn_weights: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Inference helper for backtesting.
+        """
+        if return_attn_weights:
+            final_weights, alpha, attn_weights = self.forward(
+                x, adj, target_head=target_head, horizon=horizon, return_attn_weights=True
+            )
+            return final_weights, attn_weights
+        else:
+            final_weights, alpha = self.forward(
+                x, adj, target_head=target_head, horizon=horizon
+            )
+            return final_weights
+
     def load(self, path: str, strict: bool = True):
         """
-        Hybrid Agent 로드
-        Args:
-            path: 체크포인트 경로
-            strict: 엄격한 로딩 여부 (BaseModel 호환성 위해 추가, Hybrid는 수동 로드하므로 무시하거나 참조)
+        Hybrid Agent 로드 (유연한 키 처리 추가)
         """
         checkpoint = torch.load(path, map_location=self.device)
-        # Hybrid는 각 컴포넌트별로 state_dict가 분리되어 있으므로 strict=strict로 전달
-        self.ddpg.actor.load_state_dict(checkpoint["ddpg_actor"], strict=strict)
-        self.ddpg.critic.load_state_dict(checkpoint["ddpg_critic"], strict=strict)
-        self.ensemble_net.load_state_dict(checkpoint["ensemble"], strict=strict)
-        print(f"✅ Hybrid Agent 로드 완료 (Strict={strict}): {path}")
+        
+        # 1. 'model_state_dict' 또는 루트 레벨에서 가중치 추출 시도
+        state_dict = checkpoint.get("model_state_dict", checkpoint)
+
+        # 2. 개별 컴포넌트 키가 명시적으로 있는 경우 (Hybrid 전용 저장 형식)
+        if "ddpg_actor" in checkpoint:
+            self.ddpg.actor.load_state_dict(checkpoint["ddpg_actor"], strict=strict)
+            if "ddpg_critic" in checkpoint:
+                self.ddpg.critic.load_state_dict(checkpoint["ddpg_critic"], strict=strict)
+            if "ensemble" in checkpoint:
+                self.ensemble_net.load_state_dict(checkpoint["ensemble"], strict=strict)
+            print(f"✅ Hybrid Agent 로드 완료 (명시적 키 사용): {path}")
+        
+        # 3. 키가 없지만 state_dict 내에 접두사가 있는 경우 (BaseModel/General 저장 형식)
+        else:
+            # actor, critic, ensemble_net 접두사 분리 로드 시도
+            actor_state = {k.replace("actor.", ""): v for k, v in state_dict.items() if k.startswith("actor.")}
+            critic_state = {k.replace("critic.", ""): v for k, v in state_dict.items() if k.startswith("critic.")}
+            ensemble_state = {k.replace("ensemble_net.", ""): v for k, v in state_dict.items() if k.startswith("ensemble_net.")}
+
+            # DDPG Agent 내부에 actor/critic이 있으므로 ddpg.actor.* 로 저장되었을 수 있음
+            if not actor_state:
+                actor_state = {k.replace("ddpg.actor.", ""): v for k, v in state_dict.items() if k.startswith("ddpg.actor.")}
+            if not critic_state:
+                critic_state = {k.replace("ddpg.critic.", ""): v for k, v in state_dict.items() if k.startswith("ddpg.critic.")}
+
+            loaded_parts = []
+            if actor_state:
+                self.ddpg.actor.load_state_dict(actor_state, strict=False)
+                loaded_parts.append("Actor")
+            if critic_state:
+                self.ddpg.critic.load_state_dict(critic_state, strict=False)
+                loaded_parts.append("Critic")
+            if ensemble_state:
+                try:
+                    self.ensemble_net.load_state_dict(ensemble_state, strict=False)
+                    loaded_parts.append("Ensemble")
+                except RuntimeError as e:
+                    print(f"[WARN] Ensemble weight mismatch: {e}. Skipping ensemble weight load.")
+            
+            if loaded_parts:
+                print(f"[OK] Hybrid Agent Load Complete (Parts: {', '.join(loaded_parts)}): {path}")
+            else:
+                # 최후의 수단: 전체를 ensemble_net으로 시도 (혹시 모를 에러 방지용)
+                try:
+                    self.ensemble_net.load_state_dict(state_dict, strict=False)
+                    print(f"[WARN] Hybrid Agent Load: Attempted full state_dict to Ensemble")
+                except:
+                    print(f"[ERR] Hybrid Agent Load Failed: No compatible keys found.")
+

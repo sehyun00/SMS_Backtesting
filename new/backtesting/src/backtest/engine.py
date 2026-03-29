@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import os
+import time
 from typing import Dict, Any
 
 from .strategy import StrategyHandler
@@ -141,14 +142,14 @@ class Backtester:
             target_head: TGNN head name (e.g., "Momentum1M")
             rebalance_freq: "daily", "monthly", "quarterly", "semiannual", "annual"
         """
-        print(
-            f"\n🔄 Running Strategy: {strategy_type.upper()} ({target_head}) | Freq: {rebalance_freq}"
-        )
+        print(f"   [RUN] Running Strategy Simulation: {strategy_type.upper()} ({target_head}) | Freq: {rebalance_freq}")
 
         capital = self.initial_capital
         portfolio_values = [capital]
         dates = []
         trade_logs = []
+        latencies = []
+        attention_data = []
 
         # Initial Weights
         current_weights = np.ones(self.n_stocks) / self.n_stocks
@@ -187,9 +188,25 @@ class Backtester:
                     }
                     horizon = horizon_map.get(rebalance_freq, 0)
 
-                    current_weights = self.strategy_handler.get_weights(
-                        strategy_type, self.model, window, target_head, horizon=horizon
+                    start_time = time.time()
+                    
+                    # Request attention weights for model strategies
+                    inference_out = self.strategy_handler.get_weights(
+                        strategy_type, self.model, window, target_head, horizon=horizon, return_attn_weights=True
                     )
+                    
+                    if isinstance(inference_out, tuple):
+                        current_weights, attn_weights = inference_out
+                        if attn_weights is not None:
+                            attention_data.append({
+                                "Date": target_date,
+                                "Weights": attn_weights.cpu().numpy()
+                            })
+                    else:
+                        current_weights = inference_out
+                    
+                    latency = (time.time() - start_time) * 1000  # ms
+                    latencies.append(latency)
 
                     # Apply Subset Masking (Zero out missing stocks) - only for model strategies
                     if strategy_type != "buy_and_hold" and self.valid_mask is not None:
@@ -278,11 +295,27 @@ class Backtester:
             # 날짜 기반 리밸런싱을 위한 이전 날짜 업데이트
             prev_date = target_date
 
+        # Summary Statistics
+        if latencies:
+            avg_latency = np.mean(latencies)
+            std_latency = np.std(latencies)
+            print(f"      [Performance] Avg Latency: {avg_latency:.2f}ms (+/- {std_latency:.2f}ms)")
+            
+            # Save latency info to results
+            perf_path = os.path.join(self.visualizer.results_dir, "performance.txt")
+            with open(perf_path, "w") as f:
+                f.write(f"Strategy: {strategy_type} ({target_head})\n")
+                f.write(f"Average Inference Latency: {avg_latency:.4f} ms\n")
+                f.write(f"Latency Std Dev: {std_latency:.4f} ms\n")
+                f.write(f"Total Rebalancing Events: {len(latencies)}\n")
+
         return {
             "dates": dates,
             "portfolio_values": portfolio_values[1:],  # align with dates
             "trade_logs": trade_logs,
             "final_capital": capital,
+            "latencies": latencies,
+            "attention_data": attention_data,
         }
 
     def compute_metrics(self, results):
@@ -291,3 +324,17 @@ class Backtester:
     def save_and_plot(self, results):
         self.visualizer.save_logs(results, self.symbols)
         self.visualizer.plot_comparison(results, initial_capital=self.initial_capital)
+        
+        # [XAI] Plot Attention Map if available (take first non-empty)
+        for name, res in results.items():
+            if "attention_data" in res and res["attention_data"]:
+                self.visualizer.plot_attention_heatmap(res["attention_data"], self.symbols)
+                break
+        
+        # [Research Integrity] Print Defense Logic
+        print("\n" + "-"*50)
+        print("📌 [Research Integrity] Backtest Summary Notes")
+        print("1. Universe: S&P 500 (Selected for High Liquidity & Low Slippage)")
+        print("2. Bias Defense: This study focuses on Relation Learning effectiveness.")
+        print("3. Limitation: Survival bias acknowledged. Future work with PiT data suggested.")
+        print("-"*50)

@@ -78,7 +78,7 @@ def set_seed(seed: int, deterministic: bool = True, benchmark: bool = False):
         torch.backends.cudnn.deterministic = False
         torch.backends.cudnn.benchmark = True  # True is better for performance
 
-    print(f"🔒 Reproducibility Set: Seed={seed}, Deterministic={deterministic}")
+    print(f"[Lock] Reproducibility Set: Seed={seed}, Deterministic={deterministic}")
 
 
 def main():
