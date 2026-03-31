@@ -127,16 +127,16 @@ Kenneth French Data Library에서 일별 Fama-French 5-Factor 데이터를 다�
 
 **Table 5.** 모델 하이퍼파라미터 설정
 
-환경: Python 3.10 / PyTorch 2.2 / CUDA 12.3
-하드웨어: NVIDIA GPU (CUDA 지원)
-운영체제: Windows / Linux
+환경: Python 3.12 / PyTorch 2.1 / CUDA 12.9
+하드웨어: NVIDIA GeForce RTX 2060 (VRAM 6GB)
+운영체제: Windows 11
 
 ### 4.3.1 재현성 프로토콜 (Reproducibility Protocol)
 본 연구는 학술적 신뢰성과 실험 결과의 완전한 재현성을 보장하기 위해 엄격한 재현성 프로토콜을 수립하고 준수하였다.
 
 1.  **Seed Fixing**: Python, NumPy, PyTorch, CUDA 환경의 난수 시드(Seed)를 `42`로 고정하여 모든 실험의 초기화 상태를 통일하였다.
 2.  **Deterministic Algorithms**: PyTorch 백엔드 설정에서 `cudnn.deterministic = True` 및 `cudnn.benchmark = False`를 적용하여, GPU 연산의 비결정적 요소(Non-deterministic behavior)를 제거하였다.
-3.  **Hardware Consistency**: 하드웨어별 부동소수점 연산 차이를 최소화하기 위해 모든 실험은 단일 AWS g5.xlarge 인스턴스 환경에서 수행되었다.
+3.  **Hardware Consistency**: 하드웨어별 부동소수점 연산 차이를 최소화하기 위해 모든 실험은 단일 고정 환경(NVIDIA GeForce RTX 2060, Windows 11, CUDA 12.9)에서 수행되었다. 동일 환경에서 동일 Seed로 실험을 반복하면 동일한 결과가 재현됨을 확인하였다.
 
 이러한 프로토콜을 통해, 본 연구의 실험 결과는 단순한 우연의 산물이 아닌, 검증 가능하고 재현 가능한 논리적 결과임을 보장한다.
 

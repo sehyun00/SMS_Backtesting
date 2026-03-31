@@ -22,12 +22,35 @@ TGNN은 Kipf & Welling (2017)이 제안한 Graph Convolutional Network(GCN)를 �
 
 ### Context-Aware Dual-Path Encoder
 
-본 연구에서는 가격 데이터와 거시경제 지표를 분리 처리하는 **Dual-Path Encoder** 구조를 채택하였다:
+본 연구에서는 가격 신호와 거시경제 지표의 신호 희석(Signal Dilution)을 방지하기 위해, 두 정보를 분리 처리하는 **Dual-Path Encoder** 구조를 채택하였다.
 
-- **Price Encoder**: GRU(Gated Recurrent Unit)를 사용하여 종목별 가격 시계열($[B, N, T, 5]$)을 학습
-- **Macro Encoder**: 1D-CNN을 사용하여 Fama-French 5-Factor 등 거시경제 지표($[B, N, T, 5]$)를 학습
+**Path A — Local Price Encoder (GCN 기반)**
 
-두 경로의 출력은 Concatenation 후 GCN 레이어로 전달되어 공간적 관계를 학습한다. 그래프 합성곱 연산은 다음과 같이 정의된다:
+종목별 가격 시계열 $\mathbf{X} \in \mathbb{R}^{B \times N \times T \times 5}$은 다음 절차로 처리된다:
+
+1. **Linear Projection + Layer Normalization**: 각 시점 $t$에서 OHLCV 5차원 입력을 선형 투영하여 128차원 임베딩으로 변환한다.
+
+$$h_t = \text{LayerNorm}(W_{\text{proj}} \cdot x_t + b)$$
+
+2. **2-Layer GCN with Residual Connection**: 투영된 노드 특징에 그래프 합성곱을 적용하여 종목 간 공간적 관계를 학습한다. 그래프 합성곱 연산은 다음과 같이 정의된다:
+
+$$H^{(l+1)} = \sigma\!\left( \tilde{D}^{-\frac{1}{2}} \tilde{A} \tilde{D}^{-\frac{1}{2}} H^{(l)} W^{(l)} \right)$$
+
+여기서 $\tilde{A} = A + I$는 자기 연결이 추가된 인접행렬, $\tilde{D}$는 차수행렬이다. 차원 호환 시 잔차 연결(Residual Connection)을 적용하여 기울기 소실을 방지한다. GCN은 두 층(128→128→64)으로 구성된다.
+
+3. **Multi-Head Temporal Self-Attention**: 전체 시계열 $T$ 스텝의 GCN 출력을 쌓아 $[B, T, N, 64]$ 형태로 구성한 뒤, Multi-Head Self-Attention을 적용하여 시간적 의존성을 포착한다. 이를 통해 최종 노드 임베딩 $\mathbf{E}_{\text{local}} \in \mathbb{R}^{B \times N \times 64}$을 산출한다.
+
+**Path B — Global Macro Encoder (MLP 기반)**
+
+Fama-French 5-Factor $\mathbf{F} \in \mathbb{R}^{B \times N \times T \times 5}$는 마지막 시점($t = T$)의 값을 추출하여 2층 MLP로 처리한다:
+
+$$\mathbf{E}_{\text{macro}} = \text{ReLU}(W_2 \cdot \text{ReLU}(W_1 \cdot \mathbf{F}_{T} + b_1) + b_2) \in \mathbb{R}^{B \times N \times 32}$$
+
+거시경제 지표는 시장 전체에 동일하게 적용되는 체계적 리스크(Systematic Risk) 신호로, 마지막 시점의 팩터 값이 현재 시장 국면(Market Regime)을 가장 직접적으로 반영한다.
+
+**Fusion**: 두 경로의 출력을 연접(Concatenation)하여 96차원의 융합 임베딩 $\mathbf{E}_{\text{fused}} = [\mathbf{E}_{\text{local}} \| \mathbf{E}_{\text{macro}}] \in \mathbb{R}^{B \times N \times 96}$을 생성하며, 이를 이후 예측 헤드의 입력으로 활용한다.
+
+두 경로의 출력은 Concatenation 후 예측 헤드로 전달되며, 그래프 합성곱 연산은 다음과 같이 정의된다:
 
 $$
 H^{(l+1)} = \sigma( \tilde{D}^{-\frac{1}{2}} \tilde{A} \tilde{D}^{-\frac{1}{2}} H^{(l)} W^{(l)} )
@@ -74,7 +97,7 @@ $$
 W_{final} = \alpha \cdot W_{TGNN} + (1 - \alpha) \cdot W_{DDPG}
 $$
 
-여기서 $\alpha$는 Global Pooling Network를 통해 산출된 동적 가중치이며, **Mode Collapse 방지**를 위해 $\alpha \in [0.2, 0.8]$ 범위로 클램핑(Clamping)된다. 이를 통해 한 모델이 100% 비중을 가져가는 것을 방지하고, TGNN(예측)과 DDPG(최적화)의 장점을 항상 혼합하여 과적합을 방지한다.
+여기서 $\alpha$는 Global Pooling Network를 통해 산출된 동적 가중치이며, **Mode Collapse 방지**를 위해 $\alpha \in [0.1, 0.9]$ 범위로 클램핑(Clamping)된다. 이를 통해 한 모델이 100% 비중을 가져가는 것을 방지하고, TGNN(예측)과 DDPG(최적화)의 장점을 항상 혼합하여 과적합을 방지한다. 클램핑 범위 [0.1, 0.9]는 어느 한 모듈이 지배적이 되는 것을 억제하면서도, 특정 시장 국면에서 한 모듈의 신호가 더 강하게 반영될 유연성을 확보한다.
 
 | 모듈        | 주요 역할   | 핵심 기술                       | DSS 기여도                      |
 | ----------- | ----------- | ------------------------------- | ------------------------------- |

@@ -66,17 +66,27 @@ class HybridAgent(BaseModel):
         self.horizon_embedding = nn.Embedding(4, self.horizon_dim)
 
         # 앙상블 레이어: Global Pooling으로 alpha 계산
-        # TGNN Node Embedding (96) + DDPG encoder (64) + scores(2) + horizon(8) = 170
+        # [FIX] tgnn_emb_dim 하드코딩 제거 → TGNN 모델 상태에서 동적으로 추론
+        # 근본 원인: factors on/off 여부에 따라 TGNN 출력 차원이 달라지는데
+        #            96으로 고정했다가 체크포인트(138-dim 기준) 로드 시 불일치 발생
+        # GCN 최종 레이어: 64-dim (gcn_hidden_dims[-1], TGNN 아키텍처 고정값)
+        # Macro 인코더:   32-dim (use_factors=True) 또는 0 (use_factors=False)
+        GCN_OUT_DIM: int = 64   # TGNN gcn_hidden_dims[-1] — 아키텍처 변경 시 함께 수정
+        MACRO_DIM: int = 32     # TGNN macro_encoder 출력 — 아키텍처 변경 시 함께 수정
+        DDPG_EMB_DIM: int = 64  # DDPGActor SharedFactorEncoder 출력 — 변경 시 함께 수정
+
         hidden_dim = 128
-        tgnn_emb_dim = 96  # Fixed to match trained checkpoint
-        ddpg_emb_dim = 64
-        
+        tgnn_emb_dim: int = GCN_OUT_DIM + (MACRO_DIM if self.tgnn.use_factors else 0)
+        ddpg_emb_dim: int = DDPG_EMB_DIM
+
         if self.alpha_mode == "dynamic":
             ensemble_input_dim = tgnn_emb_dim + ddpg_emb_dim + 2 + self.horizon_dim
         else:
             ensemble_input_dim = tgnn_emb_dim + ddpg_emb_dim + 2
-        
-        print(f"[INFO] Hybrid Ensemble Input Dimension: {ensemble_input_dim} (Fixed to 170)")
+
+        print(f"[INFO] Hybrid Ensemble Input Dimension: {ensemble_input_dim} "
+              f"(tgnn={tgnn_emb_dim}, ddpg={ddpg_emb_dim}, "
+              f"factors={'on' if self.tgnn.use_factors else 'off'})")
 
         self.ensemble_net = GlobalPoolHead(
             input_dim=ensemble_input_dim, hidden_dim=hidden_dim, output_dim=1
@@ -282,7 +292,8 @@ class HybridAgent(BaseModel):
         ensemble_loss = -q_value.mean()
 
         # Alpha 정규화: 극단적인 값 방지 (0.5 근처로 유도)
-        alpha_reg = 0.01 * ((alpha - 0.5) ** 2).mean()
+        # 0.01 → 0.1: DDPG Critic 불안정성이 alpha에 전파되는 것을 억제
+        alpha_reg = 0.1 * ((alpha - 0.5) ** 2).mean()
         total_ensemble_loss = ensemble_loss + alpha_reg
 
         # Optimizer Step
