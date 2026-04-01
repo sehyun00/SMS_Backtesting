@@ -1,8 +1,0 @@
-feat(backtest): XAI 히트맵 추출 추가 및 Hybrid Agent 오류 수정
-
-- TGNN 모델 및 Hybrid Agent 추론 시 Attention Weights 반환 로직 추가
-- 백테스트 엔진에 인퍼런스 지연시간(Latency) 측정 및 파일 저장 로깅 추가
-- 시각화 모듈에 Temporal Attention Map 히트맵 시각화 기능 구현
-- 윈도우 콘솔 인코딩 오류 방지를 위한 특수문자 제거 및 출력 태그 표준화 ([OK], [INFO] 등)
-- Hybrid Agent 앙상블 차원 불일치 수정 (tgnn_emb_dim 96 고정) 및 가중치 Checkpoint 유연한 로드 지원
-- 연구 무결성(Research Integrity) 확인용 백테스트 요약 기록 추가
