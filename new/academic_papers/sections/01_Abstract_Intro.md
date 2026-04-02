@@ -8,9 +8,9 @@ JoongHyun Park, Sehyun Kim, Junghyun Back, Hamin Kim, Kyungsik Lee, Hyun Lee
 
 디지털 전환과 인공지능(AI) 기술의 급속한 발전으로 의사결정 환경의 복잡성과 불확실성이 빠르게 증가하고 있다. 이에 따라 AI 기반 의사결정지원시스템(Decision Support Systems, DSS)의 중요성이 높아지고 있다. 본 연구는 금융 시장과 같이 동적이고 비정형적인 환경에서 지능적 의사결정을 지원하기 위한 신뢰할 수 있는(Trustworthy) 하이브리드 AI 기반 DSS 프레임워크를 제안한다.
 
-제안된 시스템은 Temporal Graph Neural Network (TGNN)와 Deep Deterministic Policy Gradient (DDPG)를 Horizon-Aware Dynamic Ensemble 메커니즘으로 통합하여 포트폴리오 리밸런싱(Portfolio Rebalancing) 문제를 해결한다. 특히 본 연구는 단순한 성과 향상을 넘어, AI 의사결정의 재현성(Reproducibility)과 신뢰성(Reliability)을 보장하기 위한 결정론적(Deterministic) 알고리즘과 재현성 프로토콜을 도입하였다.
+제안된 시스템은 Temporal Graph Neural Network (TGNN)와 Deep Deterministic Policy Gradient (DDPG)를 고정 알파(Fixed Alpha, α = 0.5) 균등 앙상블로 통합하여 포트폴리오 리밸런싱(Portfolio Rebalancing) 문제를 해결한다. 특히 본 연구는 단순한 성과 향상을 넘어, AI 의사결정의 재현성(Reproducibility)과 신뢰성(Reliability)을 보장하기 위해 5개 독립 시드를 사용한 **다중 시드 재현성 프로토콜(Multi-Seed Reproducibility Protocol)**을 도입하였다.
 
-S&P 500 구성 종목을 대상으로 약 19년간(2006–2025)의 데이터를 활용한 실험 결과, 제안된 Hybrid 모델은 **장기 리밸런싱 주기(Quarterly, Semiannual, Annual)에서 Benchmark를 일관되게 상회**하였으며, 특히 Annual 주기에서 CAGR 9.28%를 달성하였다. DDPG(Annual)가 최고 CAGR 10.41%를 기록했지만 주기별 성과 편차가 커서 일부 구간에서 Benchmark를 하회한 반면, Hybrid 모델은 **장기 투자 전략에 적합한 안정적 성과**를 보여 학술적 가치를 입증하였다. 또한 Flask 기반 AI 서버와 Spring–React 사용자 인터페이스를 통합하여 실시간 DSS 환경을 구현하였으며, TGNN Attention 기반 설명가능성(Explainability) 기법을 통해 모델의 의사결정 과정을 투명하게 검증하였다.
+S&P 500 구성 종목을 대상으로 약 10년간(2015–2024)의 데이터를 활용한 5-seed 반복 실험 결과, 제안된 Hybrid 모델은 **분기(Quarterly) 리밸런싱 주기에서 CAGR 9.09 ± 2.86%로 Benchmark(6.35%) 대비 +2.74%p의 안정적 초과 수익**을 달성하였다. DDPG 단독 모델이 강화학습 Critic 불안정성으로 인해 전 주기에서 음수 수익을 기록한 반면, Hybrid 모델은 TGNN의 관계 예측 신호가 DDPG의 불안정성을 효과적으로 보완하여 안정적인 초과 성과를 시현하였다. 또한 Flask 기반 AI 서버와 Spring–React 사용자 인터페이스를 통합하여 실시간 DSS 환경을 구현하였으며, TGNN Attention 기반 설명가능성(Explainability) 기법을 통해 모델의 의사결정 과정을 투명하게 검증하였다.
 
 본 연구는 예측 중심의 기존 DSS를 넘어, 관계 인식형(Structure-Aware)·재현 가능한(Reproducible)·설명 가능한(Explainable) 지능형 의사결정지원시스템의 새로운 표준을 제시한다.
 
@@ -68,13 +68,13 @@ AI DSS 관련 최신 연구는 크게 두 가지 방향으로 발전하고 있�
 2. DDPG를 통해 포트폴리오 비중 조정 정책을 강화학습 기반으로 최적화하며,
 3. Deterministic Algorithm 및 Seed Fixing을 통해 실험의 완전한 재현성을 보장한다.
 
-본 연구는 S&P 500 구성 종목 중 GICS 섹터별 대표 종목을 1개씩 추출하여 10개 종목으로 실험을 수행하였다. 종목 선정 시 Survivorship Bias를 방지하기 위해 실험 전체 기간(2006–2025) 동안 상장이 유지된 종목만을 대상으로 하였으며, 섹터 다각화를 통해 특정 산업군에 편중되지 않는 일반화 가능한 포트폴리오를 구성하였다.
+본 연구는 S&P 500 구성 종목 중 GICS 섹터별 대표 종목을 1개씩 추출하여 10개 종목으로 실험을 수행하였다. 종목 선정 시 Survivorship Bias를 방지하기 위해 실험 전체 기간(2015–2024) 동안 상장이 유지된 종목만을 대상으로 하였으며, 섹터 다각화를 통해 특정 산업군에 편중되지 않는 일반화 가능한 포트폴리오를 구성하였다.
 
 이를 통해 본 연구는 다음과 같은 기여를 한다:
 
 ① **신뢰할 수 있는 AI DSS 표준 제시**: 단순 성능 우위를 넘어, 결정론적(Deterministic) 알고리즘과 시드 고정(Seed Fixing)을 통해 언제나 검증 가능한 재현성(Reproducibility)을 확보한 AI 연구 방법론을 제시한다.
 
-② **AI 모델 통합형 DSS 설계**: 예측(TGNN)과 정책(DDPG)을 Horizon-Aware Dynamic Alpha로 동적 결합하는 통합형 DSS 아키텍처를 제안한다.
+② **AI 모델 통합형 DSS 설계**: 예측(TGNN)과 정책(DDPG)을 Fixed Alpha(α = 0.5) 균등 앙상블로 결합하는 통합형 DSS 아키텍처를 제안한다. 이는 동적 가중치 학습 방식 대비 시드 의존성을 제거하고 결정론적 재현성을 보장하는 설계 선택이다.
 
 ③ **AI DSS의 실시간 자동화 구현**: Flask-Spring-React 기반의 시스템 통합을 통해 사용자 피드백이 실시간으로 AI 정책 업데이트에 반영되는 구조를 구현한다.
 

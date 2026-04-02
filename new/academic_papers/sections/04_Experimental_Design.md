@@ -120,8 +120,7 @@ Kenneth French Data Library에서 일별 Fama-French 5-Factor 데이터를 다�
 | 배치크기 | 64 |
 | Replay Buffer 크기 | 10,000 |
 | Softmax Temperature ($\tau$) | 3.0 |
-| Hybrid Alpha 범위 | [0.1, 0.9] |
-| Horizon Embedding Dim | 8 |
+| Hybrid Alpha ($\alpha$) | 0.5 (고정) |
 | Epoch 수 | 800 |
 | Optimizer | Adam |
 
@@ -132,13 +131,28 @@ Kenneth French Data Library에서 일별 Fama-French 5-Factor 데이터를 다�
 운영체제: Windows 11
 
 ### 4.3.1 재현성 프로토콜 (Reproducibility Protocol)
-본 연구는 학술적 신뢰성과 실험 결과의 완전한 재현성을 보장하기 위해 엄격한 재현성 프로토콜을 수립하고 준수하였다.
 
-1.  **Seed Fixing**: Python, NumPy, PyTorch, CUDA 환경의 난수 시드(Seed)를 `42`로 고정하여 모든 실험의 초기화 상태를 통일하였다.
+본 연구는 학술적 신뢰성과 실험 결과의 완전한 재현성을 보장하기 위해 두 단계의 재현성 프로토콜을 수립하고 준수하였다.
+
+**[1단계] 결정론적 실험 환경 구성**
+
+1.  **Seed Fixing**: Python, NumPy, PyTorch, CUDA 환경의 난수 시드(Seed)를 통일하여 모든 실험의 초기화 상태를 고정하였다.
 2.  **Deterministic Algorithms**: PyTorch 백엔드 설정에서 `cudnn.deterministic = True` 및 `cudnn.benchmark = False`를 적용하여, GPU 연산의 비결정적 요소(Non-deterministic behavior)를 제거하였다.
-3.  **Hardware Consistency**: 하드웨어별 부동소수점 연산 차이를 최소화하기 위해 모든 실험은 단일 고정 환경(NVIDIA GeForce RTX 2060, Windows 11, CUDA 12.9)에서 수행되었다. 동일 환경에서 동일 Seed로 실험을 반복하면 동일한 결과가 재현됨을 확인하였다.
+3.  **Hardware Consistency**: 하드웨어별 부동소수점 연산 차이를 최소화하기 위해 모든 실험은 단일 고정 환경(NVIDIA GeForce RTX 2060, Windows 11, CUDA 12.9)에서 수행되었다.
 
-이러한 프로토콜을 통해, 본 연구의 실험 결과는 단순한 우연의 산물이 아닌, 검증 가능하고 재현 가능한 논리적 결과임을 보장한다.
+**[2단계] 다중 시드 강건성 검증 (Multi-Seed Robustness Validation)**
+
+단일 시드 고정만으로는 실험 결과가 특정 초기화 상태에 의존하는 **Lucky Seed 문제**를 배제할 수 없다. 이에 본 연구는 5개의 독립적인 시드($S = \{0, 42, 123, 456, 789\}$)를 사용하여 모든 모델(TGNN, DDPG, Hybrid)과 전체 리밸런싱 주기(Monthly, Quarterly, Semiannual, Annual)에 대해 실험을 반복 수행하였다.
+
+최종 보고 지표는 5회 실험의 평균(Mean)과 표준편차(Std)로 제시하여, 결과의 통계적 안정성을 검증하였다:
+
+$$
+\bar{m} \pm \sigma = \frac{1}{|S|}\sum_{s \in S} m_s \pm \sqrt{\frac{1}{|S|}\sum_{s \in S}(m_s - \bar{m})^2}
+$$
+
+여기서 $m_s$는 시드 $s$에서의 성과 지표(CAGR, Sharpe Ratio 등)이다. 이 프로토콜은 단일 시드 결과의 과적합(Overfitting to a lucky seed) 위험을 차단하며, 제안 모델의 성과가 특정 초기화에 의존하지 않는 **구조적 우위(Structural Advantage)**임을 통계적으로 입증한다.
+
+이러한 2단계 프로토콜을 통해, 본 연구의 실험 결과는 단순한 우연의 산물이 아닌, 검증 가능하고 재현 가능한 논리적 결과임을 보장한다.
 
 ## 4.4 평가 지표 (Evaluation Metrics)
 
