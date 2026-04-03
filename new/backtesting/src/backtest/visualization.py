@@ -1,5 +1,7 @@
 import os
 import matplotlib
+import numpy as np
+import seaborn as sns
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -40,7 +42,7 @@ class Visualizer:
             df_log = df_log[existing_cols]
 
             df_log.to_csv(path, index=False)
-            print(f"✅ Trade logs saved to {path}")
+            print(f"[OK] Trade logs saved to {path}")
 
     def save_metrics(
         self, results_map: Dict[str, Dict], initial_capital: float = 1_000_000
@@ -67,7 +69,7 @@ class Visualizer:
 
             path = os.path.join(self.log_dir, "backtest_metrics.csv")
             df.to_csv(path, index=False)
-            print(f"✅ Backtest metrics saved to {path}")
+            print(f"[OK] Backtest metrics saved to {path}")
 
     def plot_comparison(
         self,
@@ -197,5 +199,33 @@ class Visualizer:
         plt.tight_layout()
         plot_path = os.path.join(self.plot_dir, "comparison.png")
         plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-        print(f"✅ Comparison plot saved to {plot_path}")
+        print(f"[OK] Comparison plot saved to {plot_path}")
+        plt.close()
+
+    def plot_attention_heatmap(self, attention_data: List[Dict], symbols: List[str]):
+        """
+        XAI: Plots Temporal Attention Map for stocks.
+        """
+        if not attention_data:
+            return
+
+        # Use the latest rebalancing event for visualization
+        latest = attention_data[-1]
+        date_str = latest["Date"].strftime("%Y-%m-%d")
+        # Weights shape: [Batch=1, N, T, T] -> Take first batch and mean over heads if multiple
+        # Our implementation: [1, N, T, T]
+        weights = latest["Weights"][0]  # [N, T, T]
+        
+        # Aggregate across stocks: [T, T]
+        avg_attn = np.mean(weights, axis=0)
+        
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(avg_attn, annot=True, fmt=".2f", cmap="YlGnBu")
+        plt.title(f"Temporal Attention Map ({date_str})", fontsize=14, fontweight="bold")
+        plt.xlabel("Key (Past Time Steps)")
+        plt.ylabel("Query (Reference Time Steps)")
+        
+        plot_path = os.path.join(self.plot_dir, "attention_heatmap.png")
+        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+        print(f"[OK] Attention heatmap saved to {plot_path}")
         plt.close()

@@ -109,6 +109,7 @@ class TGNN(BaseModel):
         adj: torch.Tensor,
         macro: torch.Tensor = None,
         target_type: str = "Momentum1M",
+        **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Context-Aware Forward Pass.
@@ -145,7 +146,14 @@ class TGNN(BaseModel):
         # Temporal Attention -> Node Embeddings
         # Stack: [B, T, N, D]
         temporal_features = torch.stack(gcn_outputs, dim=1)
-        node_embeddings = self.temporal_attn(temporal_features)  # [B, N, D_node]
+        
+        # Check if we need attention weights (for XAI)
+        return_attn = kwargs.get("return_attn_weights", False)
+        if return_attn:
+            node_embeddings, attn_weights = self.temporal_attn(temporal_features, return_attn_weights=True)
+        else:
+            node_embeddings = self.temporal_attn(temporal_features)
+            attn_weights = None
 
         # ----------------------
         # Path B: Global (Macro)
@@ -176,14 +184,13 @@ class TGNN(BaseModel):
         else:
             combined_embedding = node_embeddings
 
-        # ----------------------
-        # Path D: Prediction
-        # ----------------------
         if target_type in self.predictors:
             predictions = self.predictors[target_type](combined_embedding).squeeze(-1)
         else:
             predictions = self.predictors["Momentum1M"](combined_embedding).squeeze(-1)
 
+        if return_attn:
+            return predictions, combined_embedding, attn_weights
         return predictions, combined_embedding
 
     def predict(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -206,9 +213,19 @@ class TGNN(BaseModel):
         macro: torch.Tensor = None,
         target_head: str = "Momentum1M",
         temperature: float = 1.0,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        return_attn_weights: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         import torch.nn.functional as F
 
-        scores, embeddings = self.forward(x, adj, macro=macro, target_type=target_head)
-        weights = F.softmax(scores / temperature, dim=-1)
-        return weights, embeddings
+        if return_attn_weights:
+            scores, embeddings, attn_weights = self.forward(
+                x, adj, macro=macro, target_type=target_head, return_attn_weights=True
+            )
+            weights = F.softmax(scores / temperature, dim=-1)
+            return weights, embeddings, attn_weights
+        else:
+            scores, embeddings = self.forward(
+                x, adj, macro=macro, target_type=target_head
+            )
+            weights = F.softmax(scores / temperature, dim=-1)
+            return weights, embeddings

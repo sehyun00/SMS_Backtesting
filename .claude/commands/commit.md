@@ -23,15 +23,15 @@ git diff --stat
 ```
 
 #### Type 종류
-| Type | 설명 |
-|------|------|
-| `feat` | 새로운 기능 |
-| `fix` | 버그 수정 |
-| `docs` | 문서 변경 |
-| `style` | 코드 포맷팅 |
-| `refactor` | 리팩토링 |
-| `test` | 테스트 |
-| `chore` | 기타 작업 |
+| Type | 설명 | 예시 |
+|------|------|------|
+| `feat` | 새로운 기능 | 로그인 기능 추가 |
+| `fix` | 버그 수정 | 포트폴리오 조회 오류 수정 |
+| `docs` | 문서 변경 | README 업데이트 |
+| `style` | 코드 포맷팅 | ESLint 적용 |
+| `refactor` | 리팩토링 | 함수 분리 |
+| `test` | 테스트 | 단위 테스트 추가 |
+| `chore` | 기타 작업 | 의존성 업데이트 |
 
 #### Scope 예시
 | Scope | 대상 |
@@ -52,6 +52,34 @@ git diff --stat
 
 ### 5. 커밋 실행 (승인 후)
 변경된 파일을 개별적으로 staging하고 커밋하세요. `git add .` 대신 파일을 명시적으로 추가하세요.
+
+## 커밋 메시지 예시
+
+### 기능 추가
+```
+feat(portfolio): 포트폴리오 생성 API 구현
+
+- PortfolioController.create() 추가
+- 최대 5개 제한 로직 포함
+- 유효성 검증 추가
+```
+
+### 문서 변경
+```
+docs(AI_PRD): 프론트매터 시스템 및 워크플로우 추가
+
+- 63개 스펙 파일에 YAML 프론트매터 추가
+- _inbox, _staging, _processed 폴더 구조 생성
+- /prd-prepare, /prd-process 워크플로우 추가
+```
+
+### 버그 수정
+```
+fix(notification): 알림 읽음 처리 오류 수정
+
+- 읽음 상태가 업데이트되지 않는 문제 해결
+- related: #123
+```
 
 ## 주의사항
 - 커밋 전 `git diff`로 변경 내용 한번 더 확인
