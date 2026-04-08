@@ -1,5 +1,8 @@
 import sys
 import os
+# [FIX] PyTorch와 Intel MKL이 각각 OpenMP 런타임을 로드할 때 발생하는 충돌 억제
+# 근본 원인: libiomp5md.dll 중복 초기화 (torch + numpy/scipy 경유 MKL)
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import yaml
 import copy
 import argparse
@@ -78,7 +81,7 @@ def set_seed(seed: int, deterministic: bool = True, benchmark: bool = False):
         torch.backends.cudnn.deterministic = False
         torch.backends.cudnn.benchmark = True  # True is better for performance
 
-    print(f"🔒 Reproducibility Set: Seed={seed}, Deterministic={deterministic}")
+    print(f"[Lock] Reproducibility Set: Seed={seed}, Deterministic={deterministic}")
 
 
 def main():

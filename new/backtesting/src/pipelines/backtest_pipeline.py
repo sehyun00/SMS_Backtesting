@@ -19,7 +19,7 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
     4. Run Backtester Strategy
     """
     print("\n" + "=" * 50)
-    print("🚀 Starting Backtest Pipeline")
+    print("      Starting Backtest Pipeline")
     print("=" * 50)
 
     # 1. Load Data (Test)
@@ -99,7 +99,7 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
             )
             if excluded:
                 print(
-                    f"      ⚠️ Excluded {len(excluded)} symbols not in training set: {excluded}"
+                    f"      [EXCL] Excluded {len(excluded)} symbols not in training set: {excluded}"
                 )
 
             config["data"]["test_valid_subset"] = valid_subset
@@ -108,7 +108,7 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
         # Otherwise dataset will be empty if defaults are used.
         if not config["data"]["stock_universes"]:
             print(
-                f"      ℹ️ Using Inferred Universe ({len(inferred)} symbols) for Backtest."
+                f"      [INFO] Using Inferred Universe ({len(inferred)} symbols) for Backtest."
             )
             config["data"]["stock_universes"] = sorted(list(inferred))
 
@@ -116,7 +116,7 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
         # 모든 모델을 Asset-Agnostic으로 처리 (Transfer Learning 지원)
         # TGNN도 인코더만 재사용하고 test_data 종목에 맞게 동작
         print(
-            f"      ℹ️ Model ({model_type}) is Asset-Agnostic. Using Test Data Universe ({len(inferred)} symbols) instead of Training Universe."
+            f"      [INFO] Model ({model_type}) is Asset-Agnostic. Using Test Data Universe ({len(inferred)} symbols) instead of Training Universe."
         )
         # Use Inferred Test Universe
         config["data"]["stock_universes"] = sorted(list(inferred))
@@ -140,10 +140,10 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
 
         if train_n != test_n:
             print(
-                f"      ⚠️ Universe Mismatch detected: Train({train_n}) vs Test({test_n})"
+                f"      [WARN] Universe Mismatch detected: Train({train_n}) vs Test({test_n})"
             )
             print(
-                f"      🔄 Enabling Transfer Learning (Partial Load + Fine-tuning)..."
+                f"      [SYNC] Enabling Transfer Learning (Partial Load + Fine-tuning)..."
             )
             is_transfer_learning = True
 
@@ -190,11 +190,11 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
         if is_transfer_learning:
             # Partial Load
             model.load(model_path, strict=False)
-            print("      ✅ Partial weights loaded (Encoder transferred).")
+            print("      [OK] Partial weights loaded (Encoder transferred).")
 
             # [Research Rule] DO NOT Fine-tune on Test Data (Look-ahead Bias)
             print(
-                "      🔒 Finite-tuning disabled to prevent Data Leakage (Research Integrity)."
+                "      [LOCK] Finite-tuning disabled to prevent Data Leakage (Research Integrity)."
             )
             # print("\n[3.5] Fine-tuning Model on Test Data...")
             # trainer = Trainer(config, model, dataset)

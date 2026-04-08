@@ -6,7 +6,7 @@
 
 제안된 프레임워크는 Temporal Graph Neural Network (TGNN)와 Deep Deterministic Policy Gradient (DDPG) 두 모듈을 결합한 하이브리드 에이전트(Hybrid Agent) 구조를 기반으로 하며, 예측-결정-실행의 연속 피드백 루프를 형성한다. AI DSS의 전체 구조는 Figure 1과 같이 데이터 수집-관계 학습-정책 최적화-비용 최소화-의사결정 피드백의 순환 구조로 구성된다.
 
-이 프레임워크는 단순한 데이터 분석을 넘어 시장의 구조적 상호작용을 학습하고, 강화학습 기반 의사결정을 자동화하며, DSS 내 실시간 정책 피드백을 가능하게 한다. 특히 본 연구에서는 기존의 단일 통합 모델 구조를 개선하여, 독립적인 DDPG와 TGNN 인스턴스를 조합(Composition)하고 리밸런싱 주기에 따라 가중치를 동적으로 조절하는 Horizon-Aware Ensemble 메커니즘을 도입하였다.
+이 프레임워크는 단순한 데이터 분석을 넘어 시장의 구조적 상호작용을 학습하고, 강화학습 기반 의사결정을 자동화하며, DSS 내 실시간 정책 피드백을 가능하게 한다. 특히 본 연구에서는 기존의 단일 통합 모델 구조를 개선하여, 독립적인 DDPG와 TGNN 인스턴스를 고정 알파(Fixed Alpha, α = 0.5) 균등 앙상블로 결합하는 Fixed-Weight Ensemble 메커니즘을 도입하였다.
 
 ### 3.1.1 자산 무관형 아키텍처 (Asset-Agnostic Architecture)
 
@@ -22,12 +22,35 @@ TGNN은 Kipf & Welling (2017)이 제안한 Graph Convolutional Network(GCN)를 �
 
 ### Context-Aware Dual-Path Encoder
 
-본 연구에서는 가격 데이터와 거시경제 지표를 분리 처리하는 **Dual-Path Encoder** 구조를 채택하였다:
+본 연구에서는 가격 신호와 거시경제 지표의 신호 희석(Signal Dilution)을 방지하기 위해, 두 정보를 분리 처리하는 **Dual-Path Encoder** 구조를 채택하였다.
 
-- **Price Encoder**: GRU(Gated Recurrent Unit)를 사용하여 종목별 가격 시계열($[B, N, T, 5]$)을 학습
-- **Macro Encoder**: 1D-CNN을 사용하여 Fama-French 5-Factor 등 거시경제 지표($[B, N, T, 5]$)를 학습
+**Path A — Local Price Encoder (GCN 기반)**
 
-두 경로의 출력은 Concatenation 후 GCN 레이어로 전달되어 공간적 관계를 학습한다. 그래프 합성곱 연산은 다음과 같이 정의된다:
+종목별 가격 시계열 $\mathbf{X} \in \mathbb{R}^{B \times N \times T \times 5}$은 다음 절차로 처리된다:
+
+1. **Linear Projection + Layer Normalization**: 각 시점 $t$에서 OHLCV 5차원 입력을 선형 투영하여 128차원 임베딩으로 변환한다.
+
+$$h_t = \text{LayerNorm}(W_{\text{proj}} \cdot x_t + b)$$
+
+2. **2-Layer GCN with Residual Connection**: 투영된 노드 특징에 그래프 합성곱을 적용하여 종목 간 공간적 관계를 학습한다. 그래프 합성곱 연산은 다음과 같이 정의된다:
+
+$$H^{(l+1)} = \sigma\!\left( \tilde{D}^{-\frac{1}{2}} \tilde{A} \tilde{D}^{-\frac{1}{2}} H^{(l)} W^{(l)} \right)$$
+
+여기서 $\tilde{A} = A + I$는 자기 연결이 추가된 인접행렬, $\tilde{D}$는 차수행렬이다. 차원 호환 시 잔차 연결(Residual Connection)을 적용하여 기울기 소실을 방지한다. GCN은 두 층(128→128→64)으로 구성된다.
+
+3. **Multi-Head Temporal Self-Attention**: 전체 시계열 $T$ 스텝의 GCN 출력을 쌓아 $[B, T, N, 64]$ 형태로 구성한 뒤, Multi-Head Self-Attention을 적용하여 시간적 의존성을 포착한다. 이를 통해 최종 노드 임베딩 $\mathbf{E}_{\text{local}} \in \mathbb{R}^{B \times N \times 64}$을 산출한다.
+
+**Path B — Global Macro Encoder (MLP 기반)**
+
+Fama-French 5-Factor $\mathbf{F} \in \mathbb{R}^{B \times N \times T \times 5}$는 마지막 시점($t = T$)의 값을 추출하여 2층 MLP로 처리한다:
+
+$$\mathbf{E}_{\text{macro}} = \text{ReLU}(W_2 \cdot \text{ReLU}(W_1 \cdot \mathbf{F}_{T} + b_1) + b_2) \in \mathbb{R}^{B \times N \times 32}$$
+
+거시경제 지표는 시장 전체에 동일하게 적용되는 체계적 리스크(Systematic Risk) 신호로, 마지막 시점의 팩터 값이 현재 시장 국면(Market Regime)을 가장 직접적으로 반영한다.
+
+**Fusion**: 두 경로의 출력을 연접(Concatenation)하여 96차원의 융합 임베딩 $\mathbf{E}_{\text{fused}} = [\mathbf{E}_{\text{local}} \| \mathbf{E}_{\text{macro}}] \in \mathbb{R}^{B \times N \times 96}$을 생성하며, 이를 이후 예측 헤드의 입력으로 활용한다.
+
+두 경로의 출력은 Concatenation 후 예측 헤드로 전달되며, 그래프 합성곱 연산은 다음과 같이 정의된다:
 
 $$
 H^{(l+1)} = \sigma( \tilde{D}^{-\frac{1}{2}} \tilde{A} \tilde{D}^{-\frac{1}{2}} H^{(l)} W^{(l)} )
@@ -66,23 +89,27 @@ _본 연구의 실제 시스템 구현 시, 위에서 설명된 세 가지 핵�
 
 세 모듈은 Python 기반 Flask API 서버에서 AI 엔진으로 작동하며, Spring Boot 백엔드와 React 프런트엔드를 통해 DSS 대시보드로 통합된다.
 
-### 3.4.1 Horizon-Aware Dynamic Alpha
+### 3.4.1 Fixed Alpha Ensemble
 
-본 연구는 TGNN(예측 기반)과 DDPG(정책 기반)의 기여도를 동적으로 조절하기 위해 **Horizon Embedding**을 도입하였다. 리밸런싱 주기(Horizon) 정보(0: Monthly, 1: Quarterly, 2: Semiannual, 3: Annual)를 임베딩 벡터로 변환하여 앙상블 네트워크에 주입한다.
-
-최종 포트폴리오 비중 $W_{final}$은 다음과 같이 계산된다:
+본 연구는 TGNN(예측 기반)과 DDPG(정책 기반)의 출력을 선형 결합하는 앙상블 메커니즘을 채택한다. 최종 포트폴리오 비중 $W_{final}$은 다음과 같이 정의된다:
 
 $$
 W_{final} = \alpha \cdot W_{TGNN} + (1 - \alpha) \cdot W_{DDPG}
 $$
 
-여기서 $\alpha$는 Global Pooling Network를 통해 산출된 동적 가중치이며, **Mode Collapse 방지**를 위해 $\alpha \in [0.2, 0.8]$ 범위로 클램핑(Clamping)된다. 이를 통해 한 모델이 100% 비중을 가져가는 것을 방지하고, TGNN(예측)과 DDPG(최적화)의 장점을 항상 혼합하여 과적합을 방지한다.
+본 연구에서는 $\alpha = 0.5$로 고정하여 두 모듈의 기여도를 균등하게 설정한다. 이 설계 결정은 두 가지 근거에 기반한다.
 
-| 모듈        | 주요 역할   | 핵심 기술                       | DSS 기여도                      |
-| ----------- | ----------- | ------------------------------- | ------------------------------- |
-| TGNN        | 관계 학습   | Multi-Head GCN + Temporal Attn  | 시장 구조 및 추세 동시 학습     |
-| DDPG        | 정책 최적화 | Asset-Agnostic (Shared Weights) | 가변 유니버스 대응 및 최적화    |
-| Ensemble    | 통합 제어   | Horizon-Aware Dynamic Alpha     | 투자 주기에 따른 최적 모델 조합 |
-| 통합 시스템 | DSS 운영    | Flask–Spring–React 구조         | 실시간 피드백 & XAI             |
+**첫째, 재현성(Reproducibility) 보장이다.** 동적으로 학습된 $\alpha$는 강화학습 훈련 과정의 확률적 특성(Stochasticity)에 민감하게 반응하여, 동일 모델이라도 학습 시드(Seed)에 따라 앙상블 가중치가 크게 달라질 수 있다. 본 연구의 예비 실험(Pilot Study)에서 Dynamic Alpha 설정은 일부 리밸런싱 주기에서 시드 간 CAGR 표준편차가 평균을 초과하는 불안정성을 보였다. 고정 알파는 이러한 시드 의존성(Seed Dependency)을 제거하여 실험의 결정론적(Deterministic) 재현성을 확보한다.
+
+**둘째, 모듈 간 기여도 공정성(Fairness)이다.** $\alpha = 0.5$는 TGNN의 관계 예측 신호와 DDPG의 정책 최적화 신호에 동등한 가중치를 부여함으로써, 특정 모듈에 대한 사전 편향(Bias)을 배제하고 두 모듈의 상호보완적 특성이 최대한 발현되도록 한다. 이는 앙상블 이론에서 개별 모델의 오차가 독립적일 때 균등 가중치가 최적 분산을 달성한다는 이론적 근거(Brown et al., 2005)와 일치한다.
+
+이를 통해 한 모듈이 다른 모듈을 압도(Dominate)하는 Mode Collapse를 방지하며, 두 모듈의 장점이 균형 있게 통합된다.
+
+| 모듈        | 주요 역할   | 핵심 기술                       | DSS 기여도                         |
+| ----------- | ----------- | ------------------------------- | ---------------------------------- |
+| TGNN        | 관계 학습   | Multi-Head GCN + Temporal Attn  | 시장 구조 및 추세 동시 학습        |
+| DDPG        | 정책 최적화 | Asset-Agnostic (Shared Weights) | 가변 유니버스 대응 및 최적화       |
+| Ensemble    | 통합 제어   | Fixed Alpha (α = 0.5)           | 두 모듈의 균등 기여 및 재현성 보장 |
+| 통합 시스템 | DSS 운영    | Flask–Spring–React 구조         | 실시간 피드백 & XAI                |
 
 **Table 1.** 하이브리드 AI DSS 모듈별 역할 및 핵심 기술 요약

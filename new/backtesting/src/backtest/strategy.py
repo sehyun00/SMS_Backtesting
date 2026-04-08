@@ -19,7 +19,8 @@ class StrategyHandler:
         window: Dict[str, Any],
         target_head: str = None,
         horizon: int = 0,
-    ) -> np.ndarray:
+        return_attn_weights: bool = False,
+    ) -> Any:
         """
         Determines portfolio weights based on strategy type.
 
@@ -30,15 +31,15 @@ class StrategyHandler:
             return np.ones(self.n_stocks) / self.n_stocks
 
         elif strategy_type == "model":
-            return self._model_strategy(model, window, target_head, horizon)
+            return self._model_strategy(model, window, target_head, horizon, return_attn_weights)
 
         else:
             # Default fallback
             return np.ones(self.n_stocks) / self.n_stocks
 
     def _model_strategy(
-        self, model, window: Dict[str, Any], target_head: str, horizon: int = 0
-    ) -> np.ndarray:
+        self, model, window: Dict[str, Any], target_head: str, horizon: int = 0, return_attn_weights: bool = False
+    ) -> Any:
         """
         Executes model inference and applies weighting logic.
 
@@ -95,16 +96,22 @@ class StrategyHandler:
                 # Let's pass what we have; Hybrid forward might need alignment.
                 # For now, keeping Hybrid flow simple as user focus is TGNN verification.
                 if adj is not None:
-                    weights, alpha = model(
-                        x_input, adj, target_head=target_head, horizon=horizon
+                    weights_out = model(
+                        x_input, adj, target_head=target_head, horizon=horizon, return_attn_weights=return_attn_weights
                     )
                 else:
                     N = x_input.shape[1]
                     adj = torch.eye(N).unsqueeze(0).to(self.device)
-                    weights, alpha = model(
-                        x_input, adj, target_head=target_head, horizon=horizon
+                    weights_out = model(
+                        x_input, adj, target_head=target_head, horizon=horizon, return_attn_weights=return_attn_weights
                     )
-                return weights.cpu().numpy()[0]
+                
+                if return_attn_weights and isinstance(weights_out, tuple):
+                    # weights_out = (final_weights, alpha, attn_weights)
+                    return weights_out[0].cpu().numpy()[0], weights_out[2]
+                elif isinstance(weights_out, tuple):
+                    return weights_out[0].cpu().numpy()[0]
+                return weights_out.cpu().numpy()[0]
 
             # DDPG 및 기타 RL 모델
             elif hasattr(model, "actor"):
@@ -126,17 +133,25 @@ class StrategyHandler:
                 # TGNN / Supervised Models
                 # Pass macro if available
                 if macro_input is not None and "prices" in locals():
-                    preds, _ = model(
-                        prices, adj, macro=macro_input, target_type=target_head
+                    output = model(
+                        prices, adj, macro=macro_input, target_type=target_head, return_attn_weights=return_attn_weights
                     )
                 elif macro_input is not None:
-                    preds, _ = model(
-                        x_input, adj, macro=macro_input, target_type=target_head
+                    output = model(
+                        x_input, adj, macro=macro_input, target_type=target_head, return_attn_weights=return_attn_weights
                     )
                 else:
-                    preds, _ = model(x_input, adj, target_type=target_head)
+                    output = model(x_input, adj, target_type=target_head, return_attn_weights=return_attn_weights)
 
-                scores = preds.cpu().numpy()[0]  # [N]
+                if return_attn_weights and isinstance(output, tuple):
+                    # output = (preds, combined_embedding, attn_weights)
+                    scores = output[0].cpu().numpy()[0]
+                    return self._calculate_softmax_weights(scores), output[2]
+                elif isinstance(output, tuple):
+                    scores = output[0].cpu().numpy()[0]
+                    return self._calculate_softmax_weights(scores)
+                
+                scores = output.cpu().numpy()[0]  # [N]
 
                 return self._calculate_softmax_weights(scores)
 
