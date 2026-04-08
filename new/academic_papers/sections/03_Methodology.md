@@ -50,14 +50,6 @@ $$\mathbf{E}_{\text{macro}} = \text{ReLU}(W_2 \cdot \text{ReLU}(W_1 \cdot \mathb
 
 **Fusion**: 두 경로의 출력을 연접(Concatenation)하여 96차원의 융합 임베딩 $\mathbf{E}_{\text{fused}} = [\mathbf{E}_{\text{local}} \| \mathbf{E}_{\text{macro}}] \in \mathbb{R}^{B \times N \times 96}$을 생성하며, 이를 이후 예측 헤드의 입력으로 활용한다.
 
-두 경로의 출력은 Concatenation 후 예측 헤드로 전달되며, 그래프 합성곱 연산은 다음과 같이 정의된다:
-
-$$
-H^{(l+1)} = \sigma( \tilde{D}^{-\frac{1}{2}} \tilde{A} \tilde{D}^{-\frac{1}{2}} H^{(l)} W^{(l)} )
-$$
-
-여기서 $\tilde{A} = A + I$는 자기 연결이 추가된 인접행렬, $\tilde{D}$는 차수행렬이다. 본 모델은 안정적 학습을 위해 잔차 연결(Residual Connection)과 Layer Normalization을 적용하였다.
-
 ### Multi-Head Prediction & Loss Function
 
 4가지 기간(1개월, 3개월, 6개월, 12개월)의 가격 모멘텀을 동시에 예측하는 멀티 태스크(Multi-Task) 구조를 채택하였다. 손실 함수는 절대 오차와 상대 순위를 모두 고려한 복합 손실을 사용한다:
