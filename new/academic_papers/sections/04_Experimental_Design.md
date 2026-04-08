@@ -28,18 +28,18 @@ Wikipedia의 S&P 500 구성 종목 리스트를 자동 크롤링하여 전체 �
 
 위 절차를 통해 선정된 10개 Test 종목은 Table 2와 같다.
 
-| 티커 | 종목명 | 섹터 |
-| --- | --- | --- |
-| MMM | 3M Company | Industrials |
-| ABT | Abbott Laboratories | Health Care |
-| ACN | Accenture plc | Information Technology |
-| AFL | Aflac Inc | Financials |
-| APD | Air Products & Chemicals | Materials |
-| ARE | Alexandria Real Estate | Real Estate |
-| GOOGL | Alphabet Inc | Communication Services |
-| MO | Altria Group | Consumer Staples |
-| AMZN | Amazon.com Inc | Consumer Discretionary |
-| APA | APA Corporation | Energy |
+| 티커  | 종목명                   | 섹터                   |
+| ----- | ------------------------ | ---------------------- |
+| MMM   | 3M Company               | Industrials            |
+| ABT   | Abbott Laboratories      | Health Care            |
+| ACN   | Accenture plc            | Information Technology |
+| AFL   | Aflac Inc                | Financials             |
+| APD   | Air Products & Chemicals | Materials              |
+| ARE   | Alexandria Real Estate   | Real Estate            |
+| GOOGL | Alphabet Inc             | Communication Services |
+| MO    | Altria Group             | Consumer Staples       |
+| AMZN  | Amazon.com Inc           | Consumer Discretionary |
+| APA   | APA Corporation          | Energy                 |
 
 **Table 2.** S&P 500에서 GICS 섹터별 균등 추출된 10개 Test 종목
 
@@ -54,11 +54,11 @@ Wikipedia의 S&P 500 구성 종목 리스트를 자동 크롤링하여 전체 �
 
 모델의 입력 특징은 두 가지 경로(Dual-Path)로 분리하여 구성하였다:
 
-| 경로 | 특징 | 개수 |
-| --- | --- | --- |
-| Local (Price) | Open, High, Low, Close, Volume | 5개 |
-| Global (Macro) | Mkt_RF, SMB, HML, RMW, CMA | 5개 |
-| **합계** | | **10개** |
+| 경로           | 특징                           | 개수     |
+| -------------- | ------------------------------ | -------- |
+| Local (Price)  | Open, High, Low, Close, Volume | 5개      |
+| Global (Macro) | Mkt_RF, SMB, HML, RMW, CMA     | 5개      |
+| **합계**       |                                | **10개** |
 
 **Table 3.** Dual-Path 입력 특징 구성
 
@@ -72,12 +72,12 @@ Wikipedia의 S&P 500 구성 종목 리스트를 자동 크롤링하여 전체 �
 
 원시 OHLCV 데이터로부터 다음의 파생변수를 생성하여 TGNN의 예측 레이블(Label)로 활용하였다:
 
-| 지표 | 산출 방법 | 목적 |
-| --- | --- | --- |
-| Momentum (1M, 3M, 6M, 12M) | 각각 20, 60, 120, 252 거래일 수익률 | 다중 시간 스케일의 추세 포착 (예측 대상) |
-| Volatility | 20일 수익률 표준편차 × $\sqrt{252}$ (연율화) | 리스크 수준 정량화 |
-| RSI (14) | 14일 상대강도지수 | 과매수/과매도 판단 |
-| MACD (12, 26, 9) | 12일·26일 EMA 차이 및 9일 시그널 | 단기 모멘텀 전환 감지 |
+| 지표                       | 산출 방법                                   | 목적                                     |
+| -------------------------- | ------------------------------------------- | ---------------------------------------- |
+| Momentum (1M, 3M, 6M, 12M) | 각각 20, 60, 120, 252 거래일 수익률         | 다중 시간 스케일의 추세 포착 (예측 대상) |
+| Volatility                 | 20일 수익률 표준편차 ×$\sqrt{252}$ (연율화) | 리스크 수준 정량화                       |
+| RSI (14)                   | 14일 상대강도지수                           | 과매수/과매도 판단                       |
+| MACD (12, 26, 9)           | 12일·26일 EMA 차이 및 9일 시그널            | 단기 모멘텀 전환 감지                    |
 
 **Table 4.** TGNN 입력 기술적 지표 및 산출 방법
 
@@ -108,21 +108,21 @@ Kenneth French Data Library에서 일별 Fama-French 5-Factor 데이터를 다�
 
 ## 4.3 실험 환경 및 하이퍼파라미터 (Experimental Environment & Hyperparameters)
 
-| 구성 요소 | 설정값 |
-| --- | --- |
-| TGNN 히든 레이어 | 64 |
-| TGNN Attention Head | 4 |
-| TGNN Dropout | 0.1 |
-| DDPG Actor LR | 1e–4 |
-| DDPG Critic LR | 1e–3 |
-| 할인계수 ($\gamma$) | 0.99 |
-| Soft Update ($\tau$) | 0.001 |
-| 배치크기 | 64 |
-| Replay Buffer 크기 | 10,000 |
-| Softmax Temperature ($\tau$) | 3.0 |
-| Hybrid Alpha ($\alpha$) | 0.5 (고정) |
-| Epoch 수 | 800 |
-| Optimizer | Adam |
+| 구성 요소                    | 설정값     |
+| ---------------------------- | ---------- |
+| TGNN 히든 레이어             | 64         |
+| TGNN Attention Head          | 4          |
+| TGNN Dropout                 | 0.1        |
+| DDPG Actor LR                | 1e–4       |
+| DDPG Critic LR               | 1e–3       |
+| 할인계수 ($\gamma$)          | 0.99       |
+| Soft Update ($\tau$)         | 0.001      |
+| 배치크기                     | 64         |
+| Replay Buffer 크기           | 10,000     |
+| Softmax Temperature ($\tau$) | 3.0        |
+| Hybrid Alpha ($\alpha$)      | 0.5 (고정) |
+| Epoch 수                     | 800        |
+| Optimizer                    | Adam       |
 
 **Table 5.** 모델 하이퍼파라미터 설정
 
@@ -136,9 +136,9 @@ Kenneth French Data Library에서 일별 Fama-French 5-Factor 데이터를 다�
 
 **[1단계] 결정론적 실험 환경 구성**
 
-1.  **Seed Fixing**: Python, NumPy, PyTorch, CUDA 환경의 난수 시드(Seed)를 통일하여 모든 실험의 초기화 상태를 고정하였다.
-2.  **Deterministic Algorithms**: PyTorch 백엔드 설정에서 `cudnn.deterministic = True` 및 `cudnn.benchmark = False`를 적용하여, GPU 연산의 비결정적 요소(Non-deterministic behavior)를 제거하였다.
-3.  **Hardware Consistency**: 하드웨어별 부동소수점 연산 차이를 최소화하기 위해 모든 실험은 단일 고정 환경(NVIDIA GeForce RTX 2060, Windows 11, CUDA 12.9)에서 수행되었다.
+1. **Seed Fixing**: Python, NumPy, PyTorch, CUDA 환경의 난수 시드(Seed)를 통일하여 모든 실험의 초기화 상태를 고정하였다.
+2. **Deterministic Algorithms**: PyTorch 백엔드 설정에서 `cudnn.deterministic = True` 및 `cudnn.benchmark = False`를 적용하여, GPU 연산의 비결정적 요소(Non-deterministic behavior)를 제거하였다.
+3. **Hardware Consistency**: 하드웨어별 부동소수점 연산 차이를 최소화하기 위해 모든 실험은 단일 고정 환경(NVIDIA GeForce RTX 2060, Windows 11, CUDA 12.9)에서 수행되었다.
 
 **[2단계] 다중 시드 강건성 검증 (Multi-Seed Robustness Validation)**
 
@@ -158,18 +158,22 @@ $$
 
 제안된 모델의 성능은 세 가지 범주에서 평가하였다.
 
-| 범주 | 지표 | 목적 |
-| --- | --- | --- |
-| 예측 정확도(Prediction Accuracy) | MSE, RMSE, R² | TGNN 예측 및 임베딩 품질 평가 |
+| 범주                                        | 지표                                     | 목적                              |
+| ------------------------------------------- | ---------------------------------------- | --------------------------------- |
+| 예측 정확도(Prediction Accuracy)            | MSE, RMSE, R²                            | TGNN 예측 및 임베딩 품질 평가     |
 | 리스크 조정 성과(Risk-adjusted Performance) | Sharpe Ratio, Sortino Ratio, CVaR, Omega | DDPG 정책의 리스크-보상 균형 평가 |
 
 **Table 6.** 성능 평가 지표 범주 및 목적
 
 **Sharpe Ratio**와 **Sortino Ratio**는 다음과 같이 정의된다:
 
-$$ \text{Sharpe Ratio} = \frac{R_p - R_f}{\sigma_p} $$
+$$
+\text{Sharpe Ratio} = \frac{R_p - R_f}{\sigma_p}
+$$
 
-$$ \text{Sortino Ratio} = \frac{R_p - R_f}{\sigma_d} $$
+$$
+\text{Sortino Ratio} = \frac{R_p - R_f}{\sigma_d}
+$$
 
 - **CVaR(Conditional Value-at-Risk)**은 손실 분포 하위 5%의 평균 손실로 측정하였다.
 
@@ -177,12 +181,12 @@ $$ \text{Sortino Ratio} = \frac{R_p - R_f}{\sigma_d} $$
 
 제안된 하이브리드 AI DSS의 우수성을 검증하기 위해, 다음의 비교 대상을 설정하였다:
 
-| 모델 | 설명 | 특성 |
-| --- | --- | --- |
-| Benchmark (Buy & Hold) | 동일 비중 매입 후 보유 전략 | 패시브 전략 기준선 |
-| TGNN | 그래프 기반 관계 예측 모델 | 시장 구조 반영 가능, 정책 최적화 미포함 |
-| DDPG | 강화학습 기반 정책 최적화 모델 | 정책 학습 가능, 종목 간 관계 인식 불가 |
-| TGNN+DDPG Hybrid (Proposed) | 하이브리드 DSS 모델 | 관계·정책·앙상블 최적화 통합 구조 |
+| 모델                        | 설명                           | 특성                                    |
+| --------------------------- | ------------------------------ | --------------------------------------- |
+| Benchmark (Buy & Hold)      | 동일 비중 매입 후 보유 전략    | 패시브 전략 기준선                      |
+| TGNN                        | 그래프 기반 관계 예측 모델     | 시장 구조 반영 가능, 정책 최적화 미포함 |
+| DDPG                        | 강화학습 기반 정책 최적화 모델 | 정책 학습 가능, 종목 간 관계 인식 불가  |
+| TGNN+DDPG Hybrid (Proposed) | 하이브리드 DSS 모델            | 관계·정책·앙상블 최적화 통합 구조       |
 
 **Table 7.** 비교 대상 모델(Baseline) 구성
 
