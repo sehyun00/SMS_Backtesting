@@ -22,7 +22,7 @@ Table 8은 각 모델의 리밸런싱 주기에 따른 주요 재무 성과 지�
 |                | Semiannual    |     2.96 ± 7.12 |     0.08 ± 0.32 | 26.02 ± 6.07 |     14.50 ± 27.90 |
 |                | Annual        |     5.95 ± 6.76 |     0.22 ± 0.34 | 24.65 ± 3.24 |     27.84 ± 31.27 |
 
-**Table 8.** Comprehensive Performance Analysis by Rebalancing Period (5-Seed Mean ± Std, Test Period: 2021–2024)
+**Table 8.** Comprehensive Performance Analysis by Rebalancing Period (5-Seed Mean ± Std, Test Period: 2021–2025)
 
 ![Figure 2. CAGR Comparison by Rebalancing Frequency](../images/fig_01_cagr_by_frequency.png)
 
@@ -63,7 +63,16 @@ Table 9는 리밸런싱 주기를 가로질러 각 모델의 평균 성과 및 �
 
 제안된 AI DSS는 **Flask–Spring–React 통합 아키텍처**를 기반으로 구현되었으며, 모델 출력(리밸런싱 비중, 리스크 경고, 거래 제안 등)은 **REST API**를 통해 대시보드에 실시간 반영된다.
 
-DSS의 핵심은 사용자가 AI의 의사결정 과정을 이해할 수 있도록 설명가능성(Explainable AI, XAI)을 제공하는 것이다. 본 연구에서는 TGNN Attention 시각화를 통해 종목 간 관계를 해석하고, 포트폴리오 비중 결정의 근거를 제시한다.
+DSS의 핵심은 사용자가 AI의 의사결정 과정을 이해할 수 있도록 설명가능성(Explainable AI, XAI)을 제공하는 것이다. 본 연구에서는 TGNN의 Multi-Head Temporal Self-Attention 가중치를 추출하여 두 가지 시각화를 제공한다.
+
+**Temporal Attention Map** (Figure 5a): 전체 종목에 대해 평균된 $T \times T$ Attention 행렬로, 모델이 포트폴리오 비중을 결정할 때 룩백 기간(Lookback Period) 내 어느 시점에 집중하는지를 보여준다. 최종 시점(Query)이 최근 시점(Key)에 높은 가중치를 부여하는 패턴은 TGNN이 단기 모멘텀 신호를 우선적으로 활용함을 시사한다.
+
+**Stock Attention Map** (Figure 5b): 최종 쿼리 시점에서 각 종목($N$)이 룩백 기간의 어느 시점에 주목하는지를 나타내는 $N \times T$ 행렬이다. 섹터별 종목 간 Attention 집중 시점의 차이를 통해, TGNN이 IT·금융 섹터와 에너지·소재 섹터가 서로 다른 시장 국면에 민감하게 반응함을 학습하였음을 확인할 수 있다.
+
+![Figure 5a. TGNN Temporal Attention Map](../images/attention_temporal.png)
+![Figure 5b. TGNN Stock-Level Attention Map](../images/attention_stock.png)
+
+**Figure 5.** TGNN Attention Visualization (Hybrid Quarterly, Test Period). (a) Temporal T×T attention averaged over stocks. (b) Stock-level N×T attention at the final prediction step.
 
 ## 5.4 고찰 (Discussion)
 

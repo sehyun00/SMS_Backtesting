@@ -74,7 +74,7 @@ $$
 2. **Continuous Policy Distribution and Entropy Regulation**: 강화학습 에이전트의 정책(Policy) 행동은 자본 제약 조건($\sum W_i = 1, W_i \ge 0$)을 만족하는 연속적 포트폴리오 비중이어야 한다. 제안 모델은 잠재 표상으로부터 각 자산의 상대적 투자 매력도를 스칼라 값으로 산출한 후, Temperature-scaled Softmax 함수를 통해 정책 분포($W_i$)를 형성한다. 여기서 온도 파라미터($\tau = 3.0$)는 정책의 엔트로피(Entropy)를 제어하는 정규화(Regularization) 기제로 작용하며, 지식 탐색(Exploration)과 수확(Exploitation) 간의 수학적 균형을 맞춰 포트폴리오의 분산도를 제어한다.
 
 $$
-W*i = \frac{\exp(s_i / \tau)}{\sum*{j=1}^{N} \exp(s_j / \tau)}
+W_i = \frac{\exp(s_i / \tau)}{\sum_{j=1}^{N} \exp(s_j / \tau)}
 $$
 
 3. **Permutation-Invariant Portfolio Value Estimation**: 통합 포트폴리오의 예상 가치(Q-value)를 평가하는 Critic 신경망은, 포트폴리오 구성 자산의 입력 순서가 변경되더라도 동일한 가치를 산출해야 하는 순열 불변성(Permutation-Invariance)을 요구한다. 이를 수학적으로 보장하기 위해 본 연구는 집합 연산에 기반한 **Deep Sets** 아키텍처(Zaheer et al., 2017)를 채택하였다. 로컬 수준에서 평가된 개별 특징($\phi$)을 전역 변수로 합산(Aggregation)하고 글로벌 신경망($\rho$)을 통해 최종 가치를 평가하므로, 포트폴리오 크기가 변하더라도 모델 구조의 변경 없이 일관된 시스템 가치 추정이 보장된다.

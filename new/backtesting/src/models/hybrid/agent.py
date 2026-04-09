@@ -426,7 +426,11 @@ class HybridAgent(BaseModel):
             if "ddpg_critic" in checkpoint:
                 self.ddpg.critic.load_state_dict(checkpoint["ddpg_critic"], strict=strict)
             if "ensemble" in checkpoint:
-                self.ensemble_net.load_state_dict(checkpoint["ensemble"], strict=strict)
+                try:
+                    self.ensemble_net.load_state_dict(checkpoint["ensemble"], strict=False)
+                except RuntimeError as e:
+                    print(f"[WARN] Ensemble weight mismatch (alpha_mode 변경 감지): {e}")
+                    print("[INFO] Ensemble은 랜덤 초기화 상태로 백테스트 진행 (Fixed Alpha 모드에서는 무관)")
             print(f"✅ Hybrid Agent 로드 완료 (명시적 키 사용): {path}")
         
         # 3. 키가 없지만 state_dict 내에 접두사가 있는 경우 (BaseModel/General 저장 형식)

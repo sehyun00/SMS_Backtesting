@@ -204,7 +204,9 @@ class Visualizer:
 
     def plot_attention_heatmap(self, attention_data: List[Dict], symbols: List[str]):
         """
-        XAI: Plots Temporal Attention Map for stocks.
+        XAI: Plots two Attention visualizations for the paper.
+        1. Temporal Attention Map (T x T, averaged over stocks) - time dependency pattern
+        2. Stock Attention Map (N x T, last query step) - per-stock focus on lookback periods
         """
         if not attention_data:
             return
@@ -212,20 +214,39 @@ class Visualizer:
         # Use the latest rebalancing event for visualization
         latest = attention_data[-1]
         date_str = latest["Date"].strftime("%Y-%m-%d")
-        # Weights shape: [Batch=1, N, T, T] -> Take first batch and mean over heads if multiple
-        # Our implementation: [1, N, T, T]
+        # Weights shape: [1, N, T, T] -> [N, T, T]
         weights = latest["Weights"][0]  # [N, T, T]
-        
-        # Aggregate across stocks: [T, T]
-        avg_attn = np.mean(weights, axis=0)
-        
+        N, T, _ = weights.shape
+
+        # ── Figure 1: Temporal Attention (T x T, averaged over N stocks) ──
+        avg_attn = np.mean(weights, axis=0)  # [T, T]
+
         plt.figure(figsize=(10, 8))
-        sns.heatmap(avg_attn, annot=True, fmt=".2f", cmap="YlGnBu")
-        plt.title(f"Temporal Attention Map ({date_str})", fontsize=14, fontweight="bold")
-        plt.xlabel("Key (Past Time Steps)")
-        plt.ylabel("Query (Reference Time Steps)")
-        
-        plot_path = os.path.join(self.plot_dir, "attention_heatmap.png")
+        sns.heatmap(avg_attn, annot=False, cmap="YlGnBu",
+                    xticklabels=range(1, T + 1), yticklabels=range(1, T + 1))
+        plt.title(f"TGNN Temporal Attention Map ({date_str})", fontsize=14, fontweight="bold")
+        plt.xlabel("Key (Past Time Steps)", fontsize=12)
+        plt.ylabel("Query (Reference Time Steps)", fontsize=12)
+
+        plot_path = os.path.join(self.plot_dir, "attention_temporal.png")
         plt.savefig(plot_path, dpi=300, bbox_inches="tight")
-        print(f"[OK] Attention heatmap saved to {plot_path}")
+        print(f"[OK] Temporal attention heatmap saved to {plot_path}")
+        plt.close()
+
+        # ── Figure 2: Stock Attention (N x T, from last query step) ──
+        # weights[:, -1, :] → [N, T]: each stock's attention to all lookback steps
+        stock_attn = weights[:, -1, :]  # [N, T]
+        stock_labels = symbols[:N] if len(symbols) >= N else symbols
+
+        plt.figure(figsize=(12, max(6, N * 0.6)))
+        sns.heatmap(stock_attn, annot=False, cmap="YlOrRd",
+                    xticklabels=range(1, T + 1), yticklabels=stock_labels)
+        plt.title(f"TGNN Stock-Level Attention Map ({date_str})", fontsize=14, fontweight="bold")
+        plt.xlabel("Lookback Time Steps", fontsize=12)
+        plt.ylabel("Stock", fontsize=12)
+        plt.tight_layout()
+
+        plot_path = os.path.join(self.plot_dir, "attention_stock.png")
+        plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+        print(f"[OK] Stock attention heatmap saved to {plot_path}")
         plt.close()

@@ -273,6 +273,18 @@ def run_backtest(config: Dict[str, Any], model_path: Optional[str] = None):
         results, initial_capital=backtester.initial_capital
     )
 
+    # 4. [XAI] Plot Attention Heatmap (TGNN 또는 Hybrid 모델)
+    # hasattr(model, "heads")  → TGNN standalone
+    # hasattr(model, "tgnn")   → HybridAgent (내부 TGNN 포함)
+    if hasattr(model, "heads") or hasattr(model, "tgnn"):
+        for name, res in results.items():
+            if res.get("attention_data"):
+                backtester.visualizer.plot_attention_heatmap(
+                    res["attention_data"], dataset.symbols
+                )
+                print(f"[OK] Attention heatmap generated for: {name}")
+                break
+
     # Print Final Summary
     print("\n📊 Final Metrics:")
 

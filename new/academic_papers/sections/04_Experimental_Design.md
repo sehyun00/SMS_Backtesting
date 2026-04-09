@@ -208,7 +208,7 @@ Train/Test 간 종목이 완전히 분리(Disjoint)되어 있어, 특정 종목�
 
 AI 엔진은 Flask 기반 API 서버에서 구동되며, Spring Boot 백엔드와 React 프런트엔드를 통해 DSS 인터페이스와 연동된다 (Park & Han, 2024).
 
-모델 출력(추천 비중, 리스크 경고, 거래 제안 등)은 RESTful API를 통해 대시보드에 실시간 전송되고, 사용자 피드백은 데이터베이스에 저장되어 지속 학습(Continual Learning)에 활용된다. 또한 Explainable AI(XAI) 모듈을 통합하여 SHAP 기반 변수 중요도 및 TGNN Attention 가중치를 시각화함으로써 사용자가 AI의 의사결정 근거(reasoning path)를 직관적으로 이해할 수 있도록 하였다.
+모델 출력(추천 비중, 리스크 경고, 거래 제안 등)은 RESTful API를 통해 대시보드에 실시간 전송되고, 사용자 피드백은 데이터베이스에 저장되어 지속 학습(Continual Learning)에 활용된다. 또한 Explainable AI(XAI) 모듈을 통합하여 TGNN Multi-Head Temporal Self-Attention 가중치를 추출하고, Temporal Attention Map(T×T)과 Stock Attention Map(N×T)을 시각화함으로써 사용자가 AI의 의사결정 근거(reasoning path)를 직관적으로 이해할 수 있도록 하였다.
 
 ## 4.8 실험 설계 요약 (Summary of Experimental Design)
 
