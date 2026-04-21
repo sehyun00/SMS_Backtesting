@@ -144,7 +144,7 @@ def fig01_cagr_by_frequency():
     ax.set_xticklabels([FREQ_LABELS[f] for f in FREQ_ORDER])
     ax.set_xlabel("Rebalancing Frequency")
     ax.set_ylabel("CAGR (%)")
-    ax.set_title("CAGR by Rebalancing Frequency\n(5-Seed Mean ± Std, 2015–2024)", pad=10)
+    ax.set_title("CAGR by Rebalancing Frequency\n(5-Seed Mean ± Std, 2021–2025)", pad=10)
     ax.legend(loc="upper left")
 
     out = os.path.join(OUTPUT_DIR, "fig_01_cagr_by_frequency.png")
@@ -335,7 +335,7 @@ def fig05_summary_4panel():
     fig.legend(handles=legend_patches, loc="lower center", ncol=4,
                bbox_to_anchor=(0.5, -0.02), fontsize=10)
 
-    fig.suptitle("Performance Summary by Rebalancing Frequency\n(5-Seed Mean ± Std, 2015–2024)",
+    fig.suptitle("Performance Summary by Rebalancing Frequency\n(5-Seed Mean ± Std, 2021–2025)",
                  fontsize=13, fontweight="bold", y=1.01)
     fig.tight_layout()
 
